@@ -1,0 +1,30 @@
+name: scan-olx
+
+on:
+  schedule:
+    # Toshkent vaqti bilan 05:00, 09:00, 13:00, 17:00, 21:00 (UTC+5)
+    - cron: '0 0,4,8,12,16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Skanerlash va yuborish
+        run: node scraper.mjs
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+      - name: Yuborilgan e'lonlar ro'yxatini saqlash
+        run: |
+          git config user.name "elontopbot"
+          git config user.email "elontopbot@users.noreply.github.com"
+          git add seen.json
+          git diff --cached --quiet || (git commit -m "update seen list" && git push)
