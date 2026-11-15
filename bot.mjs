@@ -160,6 +160,38 @@ async function ensurePhone(card) {
 
 // ---------- Qidiruv ----------
 let busy = false;
+let lastSearch = null; // { results, modelName }: "yana ko'rsatish" va "qayta ko'rsatish" uchun
+
+// Kartalarni adminga yuboradi va ko'rsatilgan deb belgilaydi
+async function sendCards(chatId, list, modelName) {
+  for (const r of list) {
+    const card = { ...r, ...(state.cards[r.ad.id] ? { phone: state.cards[r.ad.id].phone, phoneTried: state.cards[r.ad.id].phoneTried } : {}), modelName };
+    state.cards[r.ad.id] = card;
+    if (!state.shown.includes(r.ad.id)) state.shown.push(r.ad.id);
+    const caption = adminCaption(card);
+    try {
+      if (r.ad.photo) await tg('sendPhoto', { chat_id: chatId, photo: r.ad.photo, caption, parse_mode: 'HTML', reply_markup: cardKeyboard(card) });
+      else throw new Error('rasm yo‘q');
+    } catch (e) {
+      await tg('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', reply_markup: cardKeyboard(card), link_preview_options: { is_disabled: true } });
+    }
+    await sleep(400);
+  }
+  await save();
+}
+
+// Qidiruvdan keyin: qolgan yoki oldin ko'rsatilgan variantlar uchun tugma
+async function sendFollowUp(chatId) {
+  if (!lastSearch) return;
+  const shown = new Set(state.shown);
+  const left = lastSearch.results.filter((r) => !shown.has(r.ad.id)).length;
+  const old = lastSearch.results.length - left;
+  const rows = [];
+  if (left) rows.push([btn(`➡️ Yana ${Math.min(left, cfg.max_cards)} ta ko‘rsatish (qoldi: ${left})`, 'more')]);
+  if (old) rows.push([btn(`🔁 Oldin ko‘rsatilgan ${old} tasini qayta ko‘rsatish`, 'again')]);
+  if (rows.length) await tg('sendMessage', { chat_id: chatId, text: 'Shu qidiruv bo‘yicha:', reply_markup: { inline_keyboard: rows } });
+}
+
 async function search(chatId) {
   if (busy) return tg('sendMessage', { chat_id: chatId, text: '⏳ Qidiruv allaqachon ketyapti, kuting.' });
   busy = true;
@@ -170,9 +202,16 @@ async function search(chatId) {
     const rate = usdRate(raw, cfg.usd_rate_fallback);
     const ads = raw.map((a) => normalize(a, rate));
     const { stats, results } = evaluate(ads, c, { minComparables: cfg.min_comparables });
+    lastSearch = { results, modelName: c.model.name };
     const shown = new Set(state.shown);
     const fresh = results.filter((r) => !shown.has(r.ad.id));
     const toSend = fresh.slice(0, cfg.max_cards);
+
+    let verdict;
+    if (toSend.length) verdict = `Yuborilyapti: ${toSend.length}`;
+    else if (results.length) verdict = `Arzon variantlar bor (${results.length} ta), lekin hammasi sizga oldin yuborilgan.`;
+    else if (stats.inFilter < 5) verdict = `💡 Filtr juda tor: davrga mos atigi ${stats.inFilter} ta e‘lon qoldi. Davrni, probegni yoki viloyatni kengaytiring.`;
+    else verdict = `Filtrga mos ${stats.inFilter} ta e‘lon ichida kamida ${c.minDiscount}% arzoni yo‘q. Arzonlik foizini kamaytirib ko‘ring.`;
 
     const summary = [
       `🔎 <b>${esc(c.model.name)}</b> · ${esc(c.yearLabel)} · ${kmLabel(c.kmMax)} · ${esc(c.region || 'Hammasi')} · ${dayLabel(c.days)}`,
@@ -180,24 +219,12 @@ async function search(chatId) {
       `Yili mos: ${stats.yearOk} → probegi mos: ${stats.kmOk} → viloyati mos: ${stats.regionOk} → davrga mos: ${stats.inFilter}`,
       stats.noComparables ? `Solishtirishga o‘xshashi kam: ${stats.noComparables}` : null,
       `Kamida ${c.minDiscount}% arzon: ${results.length}, yangi: ${fresh.length}`,
-      toSend.length ? `Yuborilyapti: ${toSend.length}` : 'Yangi arzon variant topilmadi.',
+      verdict,
     ].filter(Boolean).join('\n');
     await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text: summary, parse_mode: 'HTML' });
 
-    for (const r of toSend) {
-      const card = { ...r, modelName: c.model.name };
-      state.cards[r.ad.id] = card;
-      state.shown.push(r.ad.id);
-      const caption = adminCaption(card);
-      try {
-        if (r.ad.photo) await tg('sendPhoto', { chat_id: chatId, photo: r.ad.photo, caption, parse_mode: 'HTML', reply_markup: cardKeyboard(card) });
-        else throw new Error('rasm yo‘q');
-      } catch (e) {
-        await tg('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', reply_markup: cardKeyboard(card) });
-      }
-      await sleep(400);
-    }
-    await save();
+    await sendCards(chatId, toSend, c.model.name);
+    await sendFollowUp(chatId);
     await tg('sendMessage', { chat_id: chatId, ...menu() });
   } catch (e) {
     console.error('Qidiruv xatosi:', e);
@@ -205,6 +232,16 @@ async function search(chatId) {
   } finally {
     busy = false;
   }
+}
+
+// "Yana ko'rsatish" (again=false) yoki "qayta ko'rsatish" (again=true)
+async function showMore(chatId, again) {
+  if (!lastSearch) return false;
+  const shown = new Set(state.shown);
+  const list = lastSearch.results.filter((r) => (again ? shown.has(r.ad.id) : !shown.has(r.ad.id))).slice(0, cfg.max_cards);
+  await sendCards(chatId, list, lastSearch.modelName);
+  if (!again) await sendFollowUp(chatId);
+  return true;
 }
 
 // ---------- Kanalga chiqarish ----------
@@ -272,6 +309,13 @@ async function onCallback(cq) {
   if (cmd === 'go') {
     await answer('Qidiruv boshlandi');
     return search(m.chat.id);
+  }
+  if (cmd === 'more' || cmd === 'again') {
+    if (busy) return answer('Qidiruv ketyapti, kuting');
+    await answer('Yuborilyapti');
+    await tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    if (!(await showMore(m.chat.id, cmd === 'again'))) await tg('sendMessage', { chat_id: m.chat.id, text: 'Bot qayta ishga tushgan, shuning uchun oldingi natija saqlanmagan. Qaytadan 🔍 Qidirish ni bosing.' });
+    return;
   }
   if (cmd === 'pub') return publish(cq, a);
 
