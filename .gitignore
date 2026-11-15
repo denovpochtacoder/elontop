@@ -1,2 +1,6 @@
 .tgcloud/
 node_modules/
+olx-page.html
+olx-api.json
+bot-token.txt
+scraper.log

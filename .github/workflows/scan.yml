@@ -1,9 +1,8 @@
 name: scan-olx
 
+# OLX GitHub serverlarini bloklaydi (HTTP 403), shuning uchun jadval o'chirilgan.
+# Skaner foydalanuvchi kompyuterida run-scraper.cmd orqali ishlaydi.
 on:
-  schedule:
-    # Toshkent vaqti bilan 05:00, 09:00, 13:00, 17:00, 21:00 (UTC+5)
-    - cron: '0 0,4,8,12,16 * * *'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +22,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
       - name: Yuborilgan e'lonlar ro'yxatini saqlash
+        if: always()
         run: |
           git config user.name "elontopbot"
           git config user.email "elontopbot@users.noreply.github.com"

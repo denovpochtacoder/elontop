@@ -1,9 +1,15 @@
 {
-  "search_urls": ["https://www.olx.uz/list/q-cobalt/"],
-  "models": ["cobalt", "kobalt"],
-  "year_min": 2012,
-  "year_max": 2020,
-  "mileage_max": 150000,
-  "price_max": 9000,
-  "per_run": 1
+  "per_run": 1,
+  "max_pages": 5,
+  "usd_rate_fallback": 12050,
+  "searches": [
+    {
+      "query": "cobalt",
+      "model_keys": ["cobalt"],
+      "year_min": 2012,
+      "year_max": 2020,
+      "mileage_max": 150000,
+      "price_max": 9000
+    }
+  ]
 }
