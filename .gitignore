@@ -4,3 +4,5 @@ olx-page.html
 olx-api.json
 bot-token.txt
 scraper.log
+state.json
+state.json.tmp
