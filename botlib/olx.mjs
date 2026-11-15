@@ -16,19 +16,19 @@ async function getJson(url) {
   return res.json();
 }
 
-// query bo'yicha maxPages sahifagacha e'lon oladi (har sahifa 40 ta).
-// file berilsa, internetsiz saqlangan JSON'dan o'qiydi (sinov uchun).
-export async function fetchOffers(query, maxPages, { file } = {}) {
+// query bo'yicha maxPages sahifagacha e'lon oladi (har sahifa ~40-50 ta), faqat avtomobil bo'limidan.
+// opts: regionId (OLX viloyat ID), yearFrom/yearTo (yil chegarasi), file (internetsiz sinov uchun JSON).
+export async function fetchOffers(query, maxPages, { file, regionId, yearFrom, yearTo } = {}) {
   if (file) return JSON.parse(await readFile(file, 'utf8')).data ?? [];
-  const base = `https://www.olx.uz/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(query)}`;
-  let first;
-  let sorted = true;
-  try {
-    first = await getJson(base + '&sort_by=created_at%3Adesc'); // eng yangilari birinchi
-  } catch (e) {
-    if (e.status !== 400) throw e;
-    sorted = false;
-    first = await getJson(base); // saralash qo'llab-quvvatlanmasa
+  const build = (withYearTo) => `https://www.olx.uz/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(query)}`
+    + `&category_id=${CAR_CATEGORY}&sort_by=created_at%3Adesc`
+    + (regionId ? `&region_id=${regionId}` : '')
+    + (yearFrom ? `&filter_float_motor_year%3Afrom=${yearFrom}` : '')
+    + (withYearTo && yearTo ? `&filter_float_motor_year%3Ato=${yearTo}` : '');
+  let first = await getJson(build(true));
+  if (yearTo && !(first.data ?? []).length) { // yuqori yil chegarasi ishlamasa, usiz qayta so'raymiz
+    await sleep(1200);
+    first = await getJson(build(false));
   }
   const all = [...(first.data ?? [])];
   let next = first.links?.next?.href ?? null;
@@ -39,9 +39,7 @@ export async function fetchOffers(query, maxPages, { file } = {}) {
     next = j.links?.next?.href ?? null;
   }
   // sahifalar bir-biriga biroz kirishadi: takrorlarni olib tashlaymiz
-  const unique = [...new Map(all.map((a) => [a.id, a])).values()];
-  unique.sorted = sorted;
-  return unique;
+  return [...new Map(all.map((a) => [a.id, a])).values()];
 }
 
 const param = (ad, key) => ad.params?.find((p) => p.key === key)?.value;

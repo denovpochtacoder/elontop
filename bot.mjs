@@ -48,7 +48,8 @@ function current() {
     model: cfg.models[f.model] ?? cfg.models[0],
     yearLabel: y.label, yearFrom: y.from, yearTo: y.to,
     kmMax: cfg.km[f.km] ?? 0,
-    region: cfg.regions[f.region] ?? '',
+    region: cfg.regions[f.region]?.name ?? '',
+    regionId: cfg.regions[f.region]?.id ?? 0,
     days: f.days,
     minDiscount: f.discount,
   };
@@ -84,7 +85,7 @@ function options(kind) {
   if (kind === 'model') items = cfg.models.map((m, i) => btn(mark(f.model === i, m.name), `v:model:${i}`));
   if (kind === 'year') items = cfg.years.map((y, i) => btn(mark(f.year === i, y.label), `v:year:${i}`));
   if (kind === 'km') items = cfg.km.map((v, i) => btn(mark(f.km === i, kmLabel(v)), `v:km:${i}`));
-  if (kind === 'region') items = cfg.regions.map((r, i) => btn(mark(f.region === i, r || 'Hammasi'), `v:region:${i}`));
+  if (kind === 'region') items = cfg.regions.map((r, i) => btn(mark(f.region === i, r.name || 'Hammasi'), `v:region:${i}`));
   if (kind === 'days') items = cfg.days.map((d) => btn(mark(f.days === d, dayLabel(d)), `v:days:${d}`));
   if (kind === 'discount') items = cfg.discounts.map((d) => btn(mark(f.discount === d, `${d}%+`), `v:discount:${d}`));
   const rows = [];
@@ -198,7 +199,13 @@ async function search(chatId) {
   const c = current();
   const status = await tg('sendMessage', { chat_id: chatId, text: `⏳ ${c.model.name} bo‘yicha OLX'dan qidirilmoqda...` });
   try {
-    const raw = await fetchOffers(c.model.query, cfg.max_pages);
+    // Yil chegarasini 1 yilga kengroq so'raymiz: solishtirish yili ±1 bo'yicha
+    const yr = { yearFrom: c.yearFrom ? c.yearFrom - 1 : 0, yearTo: c.yearTo ? c.yearTo + 1 : 0 };
+    let raw = await fetchOffers(c.model.query, cfg.max_pages, yr); // butun mamlakat: bozor narxi uchun
+    if (c.regionId) { // tanlangan viloyat e'lonlari alohida so'raladi
+      const regional = await fetchOffers(c.model.query, cfg.region_pages, { ...yr, regionId: c.regionId });
+      raw = [...new Map([...regional, ...raw].map((a) => [a.id, a])).values()];
+    }
     const rate = usdRate(raw, cfg.usd_rate_fallback);
     const ads = raw.map((a) => normalize(a, rate));
     const { stats, results } = evaluate(ads, c, { minComparables: cfg.min_comparables });

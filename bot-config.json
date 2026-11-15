@@ -136,20 +136,62 @@
     300000
   ],
   "regions": [
-    "",
-    "Toshkent",
-    "Andijon",
-    "Buxoro",
-    "Farg‘ona",
-    "Jizzax",
-    "Xorazm",
-    "Namangan",
-    "Navoiy",
-    "Qashqadaryo",
-    "Qoraqalpog‘iston",
-    "Samarqand",
-    "Sirdaryo",
-    "Surxondaryo"
+    {
+      "name": "",
+      "id": 0
+    },
+    {
+      "name": "Toshkent",
+      "id": 5
+    },
+    {
+      "name": "Andijon",
+      "id": 6
+    },
+    {
+      "name": "Buxoro",
+      "id": 27
+    },
+    {
+      "name": "Farg‘ona",
+      "id": 36
+    },
+    {
+      "name": "Jizzax",
+      "id": 28
+    },
+    {
+      "name": "Xorazm",
+      "id": 37
+    },
+    {
+      "name": "Namangan",
+      "id": 31
+    },
+    {
+      "name": "Navoiy",
+      "id": 30
+    },
+    {
+      "name": "Qashqadaryo",
+      "id": 29
+    },
+    {
+      "name": "Qoraqalpog‘iston",
+      "id": 32
+    },
+    {
+      "name": "Samarqand",
+      "id": 33
+    },
+    {
+      "name": "Sirdaryo",
+      "id": 35
+    },
+    {
+      "name": "Surxondaryo",
+      "id": 34
+    }
   ],
   "days": [
     1,
@@ -171,5 +213,6 @@
     "region": 0,
     "days": 3,
     "discount": 10
-  }
+  },
+  "region_pages": 6
 }
