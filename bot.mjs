@@ -12,7 +12,7 @@ const TOKEN = process.env.BOT_TOKEN?.trim();
 if (!TOKEN) { console.error('BOT_TOKEN yo‘q (bot-token.txt faylini tekshiring)'); process.exit(1); }
 
 // ---------- Holat (state.json) ----------
-let state = { offset: 0, admins: [], filters: { ...cfg.defaults }, cards: {}, published: [], shown: [] };
+let state = { offset: 0, admins: [], filters: { ...cfg.defaults }, cards: {}, published: [], shown: [], cooldownUntil: 0, phoneCooldownUntil: 0, phoneLog: [] };
 try { state = { ...state, ...JSON.parse(await readFile(here('state.json'), 'utf8')) }; } catch {}
 async function save() {
   const ids = Object.keys(state.cards);
@@ -151,15 +151,41 @@ function cardKeyboard(card, mode = 'card') {
 // Telefon: avval OLX so'rovi, bo'lmasa e'lon matnidan. Bir marta urinadi.
 async function ensurePhone(card) {
   if (card.phoneTried) return;
-  card.phoneTried = true;
   let phone = null;
-  try { phone = formatPhone(await fetchPhone(card.ad.id)); } catch (e) { console.warn('Telefon so‘rovi xatosi:', e.message); }
+  const now = Date.now();
+  state.phoneLog = (state.phoneLog ?? []).filter((t) => now - t < 3600e3);
+  const blocked = now < (state.phoneCooldownUntil ?? 0);
+  const overLimit = state.phoneLog.length >= PROT.phone_per_hour;
+  if (blocked || overLimit) {
+    card.phoneNote = blocked ? `OLX telefon berishni cheklagan, ${untilText(state.phoneCooldownUntil)} gacha kuting` : `Soatlik telefon chegarasi (${PROT.phone_per_hour} ta) tugadi`;
+  } else {
+    card.phoneTried = true;
+    card.phoneNote = null;
+    state.phoneLog.push(now);
+    try { phone = formatPhone(await fetchPhone(card.ad.id)); }
+    catch (e) {
+      console.warn('Telefon so‘rovi xatosi:', e.message);
+      if (isLimit(e)) { card.phoneTried = false; await startCooldown('phone'); card.phoneNote = `OLX telefon berishni cheklagan, ${untilText(state.phoneCooldownUntil)} gacha kuting`; }
+    }
+  }
   if (!phone) phone = phonesFromText(`${card.ad.title} ${card.ad.description ?? ''}`)[0] ?? null;
   card.phone = phone;
   await save();
 }
 
-// ---------- Qidiruv ----------
+// ---------- OLX'dan bloklanmaslik uchun himoya ----------
+const PROT = { cooldown_minutes: 120, cache_minutes: 10, phone_per_hour: 15, ...cfg.protection };
+const isLimit = (e) => e?.status === 403 || e?.status === 429;
+const untilText = (ts) => new Date(ts).toLocaleTimeString('ru-RU', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+async function startCooldown(kind) {
+  const until = Date.now() + PROT.cooldown_minutes * 60e3;
+  if (kind === 'phone') state.phoneCooldownUntil = until; else state.cooldownUntil = until;
+  await save();
+  console.warn(`OLX cheklov qo'ydi (${kind}), ${untilText(until)} gacha to'xtatildi`);
+  return until;
+}
+const fetchCache = new Map(); // so'rov kaliti -> { at, raw }: bir xil qidiruv qisqa vaqtda takrorlansa
+
 let busy = false;
 let lastSearch = null; // { results, modelName }: "yana ko'rsatish" va "qayta ko'rsatish" uchun
 
@@ -195,16 +221,29 @@ async function sendFollowUp(chatId) {
 
 async function search(chatId) {
   if (busy) return tg('sendMessage', { chat_id: chatId, text: '⏳ Qidiruv allaqachon ketyapti, kuting.' });
+  if (Date.now() < (state.cooldownUntil ?? 0)) {
+    return tg('sendMessage', { chat_id: chatId, text: `⛔️ OLX vaqtincha cheklov qo‘ygan. Bloklanish uzaymasligi uchun bot ${untilText(state.cooldownUntil)} gacha OLX'ga so‘rov yubormaydi.` });
+  }
   busy = true;
   const c = current();
   const status = await tg('sendMessage', { chat_id: chatId, text: `⏳ ${c.model.name} bo‘yicha OLX'dan qidirilmoqda...` });
   try {
     // Yil chegarasini 1 yilga kengroq so'raymiz: solishtirish yili ±1 bo'yicha
     const yr = { yearFrom: c.yearFrom ? c.yearFrom - 1 : 0, yearTo: c.yearTo ? c.yearTo + 1 : 0 };
-    let raw = await fetchOffers(c.model.query, cfg.max_pages, yr); // butun mamlakat: bozor narxi uchun
-    if (c.regionId) { // tanlangan viloyat e'lonlari alohida so'raladi
-      const regional = await fetchOffers(c.model.query, cfg.region_pages, { ...yr, regionId: c.regionId });
-      raw = [...new Map([...regional, ...raw].map((a) => [a.id, a])).values()];
+    const key = JSON.stringify([c.model.query, yr, c.regionId]);
+    const cached = fetchCache.get(key);
+    let raw;
+    let fromCache = false;
+    if (cached && Date.now() - cached.at < PROT.cache_minutes * 60e3) {
+      raw = cached.raw;
+      fromCache = true;
+    } else {
+      raw = await fetchOffers(c.model.query, cfg.max_pages, yr); // butun mamlakat: bozor narxi uchun
+      if (c.regionId) { // tanlangan viloyat e'lonlari alohida so'raladi
+        const regional = await fetchOffers(c.model.query, cfg.region_pages, { ...yr, regionId: c.regionId });
+        raw = [...new Map([...regional, ...raw].map((a) => [a.id, a])).values()];
+      }
+      fetchCache.set(key, { at: Date.now(), raw });
     }
     const rate = usdRate(raw, cfg.usd_rate_fallback);
     const ads = raw.map((a) => normalize(a, rate));
@@ -227,6 +266,7 @@ async function search(chatId) {
       stats.noComparables ? `Solishtirishga o‘xshashi kam: ${stats.noComparables}` : null,
       `Kamida ${c.minDiscount}% arzon: ${results.length}, yangi: ${fresh.length}`,
       verdict,
+      fromCache ? `ℹ️ ${PROT.cache_minutes} daqiqa ichidagi natija ishlatildi, OLX'ga qayta so‘rov yuborilmadi.` : null,
     ].filter(Boolean).join('\n');
     await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text: summary, parse_mode: 'HTML' });
 
@@ -235,7 +275,12 @@ async function search(chatId) {
     await tg('sendMessage', { chat_id: chatId, ...menu() });
   } catch (e) {
     console.error('Qidiruv xatosi:', e);
-    await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text: `❌ Qidiruvda xato: ${e.message}` }).catch(() => {});
+    let text = `❌ Qidiruvda xato: ${e.message}`;
+    if (isLimit(e)) {
+      const until = await startCooldown('search');
+      text = `⛔️ OLX cheklov qo‘ydi (${e.message}). Bloklanish uzaymasligi uchun bot ${untilText(until)} gacha OLX'ga so‘rov yubormaydi.\nShu vaqtda brauzerda ham OLX'ni ko‘p ochmang.`;
+    }
+    await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text }).catch(() => {});
   } finally {
     busy = false;
   }
@@ -331,7 +376,7 @@ async function onCallback(cq) {
   if (cmd === 'prev') {
     await ensurePhone(card);
     await editCard(cq, channelCaption(card), cardKeyboard(card, 'preview'));
-    return answer(card.phone ? 'Kanalda shunday ko‘rinadi' : 'Telefon topilmadi: postda OLX havolasi turadi');
+    return answer(card.phone ? 'Kanalda shunday ko‘rinadi' : (card.phoneNote ? card.phoneNote + '. Postda OLX havolasi turadi' : 'Telefon topilmadi: postda OLX havolasi turadi'), !card.phone && !!card.phoneNote);
   }
   if (cmd === 'back') {
     await editCard(cq, adminCaption(card), cardKeyboard(card, state.published.includes(a) ? 'done' : 'card'));

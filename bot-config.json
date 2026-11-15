@@ -214,5 +214,10 @@
     "days": 3,
     "discount": 10
   },
-  "region_pages": 6
+  "region_pages": 6,
+  "protection": {
+    "cooldown_minutes": 120,
+    "cache_minutes": 10,
+    "phone_per_hour": 15
+  }
 }

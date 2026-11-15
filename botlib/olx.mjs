@@ -95,6 +95,7 @@ export function normalize(ad, rate) {
 // OLX buni login yoki captcha bilan cheklashi mumkin: unda null qaytadi.
 export async function fetchPhone(id) {
   const res = await fetch(`https://www.olx.uz/api/v1/offers/${id}/limited-phones/`, { headers: HEADERS });
+  if (res.status === 403 || res.status === 429) { const e = new Error(`OLX HTTP ${res.status}`); e.status = res.status; throw e; }
   if (!res.ok) return null;
   const j = await res.json();
   return j?.data?.phones?.[0] ?? null;
