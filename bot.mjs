@@ -2,7 +2,8 @@
 // adminga rasm + tugmalar bilan yuboradi, "Kanalga chiqarish" bosilsa kanalga joylaydi.
 // Ishga tushirish: run-bot.cmd (token bot-token.txt faylidan o'qiladi).
 import { readFile, writeFile, rename } from 'node:fs/promises';
-import { fetchOffers, usdRate, normalize } from './botlib/olx.mjs';
+import { fetchOffers, usdRate, normalize, fetchPhone, norm } from './botlib/olx.mjs';
+import { cyr, formatPhone, phonesFromText, positionFrom, paintClean } from './botlib/text.mjs';
 import { evaluate } from './botlib/market.mjs';
 
 const here = (f) => new URL('./' + f, import.meta.url);
@@ -101,6 +102,7 @@ function level(d) {
 function when(ts) {
   return ts ? new Date(ts).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 }
+// Adminga keladigan karta (solishtirish ma'lumotlari bilan)
 function adminCaption(card, extra = '') {
   const a = card.ad;
   const lines = [
@@ -114,26 +116,46 @@ function adminCaption(card, extra = '') {
   ];
   if (card.suspicious) lines.push('⚠️ Narx juda past: bo‘lib to‘lash, xato yoki soxta e‘lon bo‘lishi mumkin');
   if (extra) lines.push('', extra);
-  return lines.filter((l) => l !== '').join('\n');
+  return lines.filter((l, i) => l !== '' || lines[i + 1] === extra).join('\n');
 }
+// Kanalga chiqadigan post (kirill shablon)
+const comma = (n) => Math.round(n).toLocaleString('en-US');
 function channelCaption(card) {
   const a = card.ad;
-  const lines = [`${tag(a.modelLabel || card.modelName)} sotiladi❗️`, `📅 Yili: ${a.year}`];
-  if (a.km) lines.push(`👣 Probeg: ${fmt(a.km)} km`);
-  if (a.color) lines.push(`🎨 Rangi: ${esc(a.color)}`);
-  if (a.fuel) lines.push(`⛽️ Yoqilg‘i: ${esc(a.fuel)}`);
-  if (a.gearbox) lines.push(`⚙️ Uzatma: ${esc(a.gearbox)}`);
-  lines.push(`💰 ${fmt(a.priceUsd)}$${a.negotiable ? ' kelishiladi' : ''}`);
-  lines.push(`📉 Bozor narxidan ~${Math.round(card.discount)}% arzon`);
-  const place = a.city || a.region;
-  if (place) lines.push(`🚩 ${esc(tag(place))}${a.district ? ', ' + esc(a.district) : ''}`);
-  lines.push(`🔗 <a href="${esc(a.url)}">Manba: OLX</a>`);
+  const text = `${a.title} ${a.description ?? ''}`;
+  const pos = positionFrom(text);
+  const lines = [`${tag(a.modelLabel || card.modelName)}${pos ? ` ${pos}-позиция` : ''} сотилади`, '', `📅 йили: ${a.year}`];
+  if (a.km) lines.push(`👣 пробег: ${comma(a.km)} км`);
+  if (paintClean(text)) lines.push('💎 краскаси тоза');
+  if (a.color) lines.push(`🎨 ранги: ${esc(cyr(a.color).toLowerCase())}`);
+  if (a.fuel) lines.push(`⛽️ ёқилғи: ${esc(cyr(a.fuel).toLowerCase())}`);
+  lines.push(`💰 ${comma(a.priceUsd)}$${a.negotiable ? ' келишилади' : ''}`);
+  if (card.phone) lines.push(`☎️ ${card.phone}`);
+  const region = (a.region ?? '').replace(/\s+(viloyati|Respublikasi)$/i, '');
+  const city = a.city && norm(a.city) !== norm(region) ? a.city : '';
+  const place = [region && tag(cyr(region)), city && cyr(city)].filter(Boolean).join(', ');
+  if (place) lines.push(`🚩 ${esc(place)}`);
+  if (!card.phone) lines.push(`🔗 <a href="${esc(a.url)}">Манба: OLX</a>`); // telefon topilmasa, havola
   return lines.join('\n');
 }
-function cardKeyboard(card, published = false) {
-  const rows = [[{ text: '🔗 Ko‘rish', url: card.ad.url }]];
-  if (!published) rows.push([btn('📢 Kanalga chiqarish', `pub:${card.ad.id}`), btn('❌ O‘tkazish', `skip:${card.ad.id}`)]);
-  return { inline_keyboard: rows };
+// mode: 'card' (yangi karta), 'preview' (oldindan ko'rish), 'done' (chiqarilgan yoki o'tkazilgan)
+function cardKeyboard(card, mode = 'card') {
+  const id = card.ad.id;
+  const view = { text: '🔗 Ko‘rish', url: card.ad.url };
+  if (mode === 'preview') return { inline_keyboard: [[btn('⬅️ Qaytish', `back:${id}`), btn('📢 Kanalga chiqarish', `pub:${id}`)]] };
+  if (mode === 'done') return { inline_keyboard: [[view]] };
+  return { inline_keyboard: [[view, btn('👁 Oldindan ko‘rish', `prev:${id}`)], [btn('📢 Kanalga chiqarish', `pub:${id}`), btn('❌ O‘tkazish', `skip:${id}`)]] };
+}
+
+// Telefon: avval OLX so'rovi, bo'lmasa e'lon matnidan. Bir marta urinadi.
+async function ensurePhone(card) {
+  if (card.phoneTried) return;
+  card.phoneTried = true;
+  let phone = null;
+  try { phone = formatPhone(await fetchPhone(card.ad.id)); } catch (e) { console.warn('Telefon so‘rovi xatosi:', e.message); }
+  if (!phone) phone = phonesFromText(`${card.ad.title} ${card.ad.description ?? ''}`)[0] ?? null;
+  card.phone = phone;
+  await save();
 }
 
 // ---------- Qidiruv ----------
@@ -190,6 +212,7 @@ async function publish(cq, id) {
   const card = state.cards[id];
   if (!card) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'E‘lon ma‘lumoti topilmadi, qayta qidiring', show_alert: true });
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
+  await ensurePhone(card);
   const caption = channelCaption(card);
   if (card.ad.photo) {
     try { await tg('sendPhoto', { chat_id: cfg.channel_id, photo: card.ad.photo, caption, parse_mode: 'HTML' }); }
@@ -199,16 +222,15 @@ async function publish(cq, id) {
   }
   state.published.push(id);
   await save();
-  await updateCard(cq, card, '✅ <b>Kanalga chiqarildi</b>', true);
+  await editCard(cq, adminCaption(card, '✅ <b>Kanalga chiqarildi</b>'), cardKeyboard(card, 'done'));
   await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Kanalga chiqarildi ✅' });
 }
 
-async function updateCard(cq, card, note, published) {
+// Kartadagi matn va tugmalarni almashtiradi (rasmli xabarda caption, rasmsizda text)
+async function editCard(cq, caption, reply_markup) {
   const m = cq.message;
-  const caption = adminCaption(card, note);
-  const reply_markup = cardKeyboard(card, published);
-  if (m.photo) await tg('editMessageCaption', { chat_id: m.chat.id, message_id: m.message_id, caption, parse_mode: 'HTML', reply_markup }).catch(() => {});
-  else await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, text: caption, parse_mode: 'HTML', reply_markup }).catch(() => {});
+  if (m.photo) await tg('editMessageCaption', { chat_id: m.chat.id, message_id: m.message_id, caption, parse_mode: 'HTML', reply_markup });
+  else await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, text: caption, parse_mode: 'HTML', reply_markup, link_preview_options: { is_disabled: true } });
 }
 
 // ---------- Update'larni qayta ishlash ----------
@@ -232,31 +254,43 @@ async function onCallback(cq) {
   if (!isAdmin(uid)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Faqat admin uchun' });
   const [cmd, a, b] = cq.data.split(':');
   const m = cq.message;
+  const answer = (text, alert = false) => tg('answerCallbackQuery', { callback_query_id: cq.id, ...(text ? { text, show_alert: alert } : {}) });
   if (cmd === 'menu') {
     await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
-    return tg('answerCallbackQuery', { callback_query_id: cq.id });
+    return answer();
   }
   if (cmd === 'set') {
     await tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options(a) } });
-    return tg('answerCallbackQuery', { callback_query_id: cq.id });
+    return answer();
   }
   if (cmd === 'v') {
     state.filters[a] = Number(b);
     await save();
     await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
-    return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Saqlandi' });
+    return answer('Saqlandi');
   }
   if (cmd === 'go') {
-    await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Qidiruv boshlandi' });
+    await answer('Qidiruv boshlandi');
     return search(m.chat.id);
   }
   if (cmd === 'pub') return publish(cq, a);
-  if (cmd === 'skip') {
-    const card = state.cards[a];
-    if (card) await updateCard(cq, card, '❌ O‘tkazib yuborildi', true);
-    return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'O‘tkazildi' });
+
+  const card = state.cards[a];
+  if (!card) return answer('E‘lon ma‘lumoti topilmadi, qayta qidiring', true);
+  if (cmd === 'prev') {
+    await ensurePhone(card);
+    await editCard(cq, channelCaption(card), cardKeyboard(card, 'preview'));
+    return answer(card.phone ? 'Kanalda shunday ko‘rinadi' : 'Telefon topilmadi: postda OLX havolasi turadi');
   }
-  return tg('answerCallbackQuery', { callback_query_id: cq.id });
+  if (cmd === 'back') {
+    await editCard(cq, adminCaption(card), cardKeyboard(card, state.published.includes(a) ? 'done' : 'card'));
+    return answer();
+  }
+  if (cmd === 'skip') {
+    await editCard(cq, adminCaption(card, '❌ O‘tkazib yuborildi'), cardKeyboard(card, 'done'));
+    return answer('O‘tkazildi');
+  }
+  return answer();
 }
 
 // ---------- Asosiy sikl (long polling) ----------

@@ -72,6 +72,7 @@ export function normalize(ad, rate) {
     id: String(ad.id),
     url: ad.url,
     title: ad.title?.trim() ?? '',
+    description: String(ad.description ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500),
     category: ad.category?.id,
     modelKey: param(ad, 'model')?.key ?? null,
     modelLabel: param(ad, 'model')?.label ?? null,
@@ -90,4 +91,13 @@ export function normalize(ad, rate) {
     createdAt: ad.created_time ? Date.parse(ad.created_time) : null,
     photo: photo ? photo.link.replace('{width}', photo.width).replace('{height}', photo.height) : null,
   };
+}
+
+// Sotuvchining telefon raqami (OLX "Ko'rsatish" tugmasi ortidagi so'rov).
+// OLX buni login yoki captcha bilan cheklashi mumkin: unda null qaytadi.
+export async function fetchPhone(id) {
+  const res = await fetch(`https://www.olx.uz/api/v1/offers/${id}/limited-phones/`, { headers: HEADERS });
+  if (!res.ok) return null;
+  const j = await res.json();
+  return j?.data?.phones?.[0] ?? null;
 }
