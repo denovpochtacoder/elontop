@@ -53,7 +53,7 @@ function current() {
   };
 }
 const kmLabel = (v) => (v ? `${fmt(v)} km gacha` : 'Hammasi');
-const dayLabel = (d) => (d === 1 ? 'Bugun' : `Oxirgi ${d} kun`);
+const dayLabel = (d) => (d === 1 ? 'Oxirgi 24 soat' : `Oxirgi ${d} kun`);
 
 function menu() {
   const c = current();
@@ -155,10 +155,11 @@ async function search(chatId) {
     const summary = [
       `🔎 <b>${esc(c.model.name)}</b> · ${esc(c.yearLabel)} · ${kmLabel(c.kmMax)} · ${esc(c.region || 'Hammasi')} · ${dayLabel(c.days)}`,
       `Tekshirildi: ${stats.fetched} e‘lon, model mos: ${stats.modelMatched}`,
-      `Filtr va davrga mos: ${stats.inFilter} (solishtirishga o‘xshashi kam: ${stats.noComparables})`,
+      `Yili mos: ${stats.yearOk} → probegi mos: ${stats.kmOk} → viloyati mos: ${stats.regionOk} → davrga mos: ${stats.inFilter}`,
+      stats.noComparables ? `Solishtirishga o‘xshashi kam: ${stats.noComparables}` : null,
       `Kamida ${c.minDiscount}% arzon: ${results.length}, yangi: ${fresh.length}`,
       toSend.length ? `Yuborilyapti: ${toSend.length}` : 'Yangi arzon variant topilmadi.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text: summary, parse_mode: 'HTML' });
 
     for (const r of toSend) {

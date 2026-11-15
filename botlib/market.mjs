@@ -31,11 +31,9 @@ function comparables(a, pool, minN) {
   return c.filter((b) => b.priceUsd >= m0 * 0.5 && b.priceUsd <= m0 * 2); // keskin chetdagilarni olib tashlash
 }
 
-// Toshkent vaqti bo'yicha "bugun" boshidan hisoblab, days kun oldingi chegara
+// Davr: hozirdan days*24 soat orqaga ("1 kun" = oxirgi 24 soat)
 export function periodStart(days, now = Date.now()) {
-  const off = 5 * 3600e3;
-  const todayStart = Math.floor((now + off) / 86400e3) * 86400e3 - off;
-  return todayStart - (days - 1) * 86400e3;
+  return now - days * 86400e3;
 }
 
 export function regionMatches(ad, region) {
@@ -48,13 +46,16 @@ export function evaluate(ads, f, { minComparables = 5, now = Date.now(), ignoreP
   const models = ads.filter((a) => modelMatches(a, f.model));
   const pool = models.filter((a) => a.priceUsd > 0 && a.year);
   const since = periodStart(f.days, now);
-  const stats = { fetched: ads.length, modelMatched: models.length, inFilter: 0, noComparables: 0 };
+  const stats = { fetched: ads.length, modelMatched: models.length, withPrice: pool.length, yearOk: 0, kmOk: 0, regionOk: 0, inFilter: 0, noComparables: 0 };
   const results = [];
   for (const a of pool) {
     if (f.yearFrom && a.year < f.yearFrom) continue;
     if (f.yearTo && a.year > f.yearTo) continue;
+    stats.yearOk++;
     if (f.kmMax && (!a.km || a.km > f.kmMax)) continue;
+    stats.kmOk++;
     if (!regionMatches(a, f.region)) continue;
+    stats.regionOk++;
     if (!ignorePeriod && (!a.createdAt || a.createdAt < since)) continue;
     stats.inFilter++;
     const comp = comparables(a, pool, minComparables);
