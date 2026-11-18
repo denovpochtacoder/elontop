@@ -1,6 +1,6 @@
 {
   "channel_id": "-1002824123374",
-  "max_pages": 8,
+  "max_pages": 6,
   "max_cards": 10,
   "min_comparables": 5,
   "usd_rate_fallback": 12050,
@@ -214,10 +214,15 @@
     "days": 3,
     "discount": 10
   },
-  "region_pages": 6,
+  "region_pages": 4,
   "protection": {
-    "cooldown_minutes": 120,
+    "cooldown_steps_minutes": [
+      120,
+      1440,
+      2880
+    ],
+    "strike_window_hours": 72,
     "cache_minutes": 10,
-    "phone_per_hour": 15
+    "phone_per_hour": 10
   }
 }

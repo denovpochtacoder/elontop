@@ -12,7 +12,7 @@ const TOKEN = process.env.BOT_TOKEN?.trim();
 if (!TOKEN) { console.error('BOT_TOKEN yo‘q (bot-token.txt faylini tekshiring)'); process.exit(1); }
 
 // ---------- Holat (state.json) ----------
-let state = { offset: 0, admins: [], filters: { ...cfg.defaults }, cards: {}, published: [], shown: [], cooldownUntil: 0, phoneCooldownUntil: 0, phoneLog: [] };
+let state = { offset: 0, admins: [], filters: { ...cfg.defaults }, cards: {}, published: [], shown: [], cooldownUntil: 0, phoneCooldownUntil: 0, phoneLog: [], strikes: [] };
 try { state = { ...state, ...JSON.parse(await readFile(here('state.json'), 'utf8')) }; } catch {}
 async function save() {
   const ids = Object.keys(state.cards);
@@ -68,7 +68,8 @@ function menu() {
     `📍 Viloyat: <b>${esc(c.region || 'Hammasi')}</b>`,
     `🕒 Davr: <b>${dayLabel(c.days)}</b>`,
     `📉 Kamida: <b>${c.minDiscount}% arzon</b>`,
-  ].join('\n');
+    Date.now() < (state.cooldownUntil ?? 0) ? `\n⛔️ OLX cheklovi: ${untilText(state.cooldownUntil)} gacha (IP almashgan bo‘lsa, /olx_reset)` : null,
+  ].filter((l) => l !== null).join('\n');
   const reply_markup = { inline_keyboard: [
     [btn('🚗 Model', 'set:model'), btn('📅 Yil', 'set:year')],
     [btn('👣 Probeg', 'set:km'), btn('📍 Viloyat', 'set:region')],
@@ -174,14 +175,24 @@ async function ensurePhone(card) {
 }
 
 // ---------- OLX'dan bloklanmaslik uchun himoya ----------
-const PROT = { cooldown_minutes: 120, cache_minutes: 10, phone_per_hour: 15, ...cfg.protection };
+const PROT = { cooldown_steps_minutes: [120, 1440, 2880], strike_window_hours: 72, cache_minutes: 10, phone_per_hour: 10, ...cfg.protection };
 const isLimit = (e) => e?.status === 403 || e?.status === 429;
-const untilText = (ts) => new Date(ts).toLocaleTimeString('ru-RU', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+const untilText = (ts) => {
+  const long = ts - Date.now() > 12 * 3600e3;
+  return new Date(ts).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', ...(long ? { day: '2-digit', month: '2-digit' } : {}), hour: '2-digit', minute: '2-digit' });
+};
+// Takroriy blokda to'xtash vaqti oshadi: 1-marta 2 soat, 2-marta 24 soat, 3-marta va undan keyin 48 soat
 async function startCooldown(kind) {
-  const until = Date.now() + PROT.cooldown_minutes * 60e3;
+  const now = Date.now();
+  state.strikes = (state.strikes ?? []).filter((t) => now - t < PROT.strike_window_hours * 3600e3);
+  state.strikes.push(now);
+  const steps = PROT.cooldown_steps_minutes;
+  const minutes = steps[Math.min(state.strikes.length, steps.length) - 1];
+  const until = now + minutes * 60e3;
   if (kind === 'phone') state.phoneCooldownUntil = until; else state.cooldownUntil = until;
+  state.lastStrike = state.strikes.length;
   await save();
-  console.warn(`OLX cheklov qo'ydi (${kind}), ${untilText(until)} gacha to'xtatildi`);
+  console.warn(`OLX cheklov qo'ydi (${kind}, ${state.strikes.length}-marta), ${untilText(until)} gacha to'xtatildi`);
   return until;
 }
 const fetchCache = new Map(); // so'rov kaliti -> { at, raw }: bir xil qidiruv qisqa vaqtda takrorlansa
@@ -222,7 +233,7 @@ async function sendFollowUp(chatId) {
 async function search(chatId) {
   if (busy) return tg('sendMessage', { chat_id: chatId, text: '⏳ Qidiruv allaqachon ketyapti, kuting.' });
   if (Date.now() < (state.cooldownUntil ?? 0)) {
-    return tg('sendMessage', { chat_id: chatId, text: `⛔️ OLX vaqtincha cheklov qo‘ygan. Bloklanish uzaymasligi uchun bot ${untilText(state.cooldownUntil)} gacha OLX'ga so‘rov yubormaydi.` });
+    return tg('sendMessage', { chat_id: chatId, text: `⛔️ OLX vaqtincha cheklov qo‘ygan. Bloklanish uzaymasligi uchun bot ${untilText(state.cooldownUntil)} gacha OLX'ga so‘rov yubormaydi.\nIP manzilingiz almashgan bo‘lsa (router o‘chirib-yoqildi yoki telefon hotspot ulandi), /olx_reset yozing.` });
   }
   busy = true;
   const c = current();
@@ -278,7 +289,7 @@ async function search(chatId) {
     let text = `❌ Qidiruvda xato: ${e.message}`;
     if (isLimit(e)) {
       const until = await startCooldown('search');
-      text = `⛔️ OLX cheklov qo‘ydi (${e.message}). Bloklanish uzaymasligi uchun bot ${untilText(until)} gacha OLX'ga so‘rov yubormaydi.\nShu vaqtda brauzerda ham OLX'ni ko‘p ochmang.`;
+      text = `⛔️ OLX cheklov qo‘ydi (${e.message}). Bloklanish uzaymasligi uchun bot ${untilText(until)} gacha OLX'ga so‘rov yubormaydi.\nBu ${state.lastStrike}-marta${state.lastStrike >= 2 ? ': takroriy bloklarda kutish vaqti uzayadi' : ''}. Shu vaqtda brauzerda ham OLX'ni ko‘p ochmang.\nIP almashtirgan bo‘lsangiz, /olx_reset yozing.`;
     }
     await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text }).catch(() => {});
   } finally {
@@ -335,6 +346,24 @@ async function onMessage(msg) {
     await tg('sendMessage', { chat_id: uid, text: `Siz admin qilib belgilandingiz (ID: ${uid}).` });
   }
   if (!isAdmin(uid)) return tg('sendMessage', { chat_id: uid, text: `Bu bot faqat admin uchun. Sizning ID: ${uid}` });
+  if (msg.text?.startsWith('/olx_reset')) {
+    state.cooldownUntil = 0;
+    state.phoneCooldownUntil = 0;
+    await save();
+    return tg('sendMessage', { chat_id: uid, text: '✅ OLX bloki bekor qilindi, qidirish mumkin.\nDiqqat: IP hali almashmagan bo‘lsa, OLX yana bloklaydi va kutish vaqti uzayadi.' });
+  }
+  if (msg.text?.startsWith('/holat')) {
+    const now = Date.now();
+    const strikes = (state.strikes ?? []).filter((t) => now - t < PROT.strike_window_hours * 3600e3).length;
+    const phones = (state.phoneLog ?? []).filter((t) => now - t < 3600e3).length;
+    return tg('sendMessage', { chat_id: uid, text: [
+      '📋 <b>Holat</b>',
+      now < (state.cooldownUntil ?? 0) ? `⛔️ Qidiruv to‘xtatilgan: ${untilText(state.cooldownUntil)} gacha` : '✅ Qidiruv ochiq',
+      now < (state.phoneCooldownUntil ?? 0) ? `⛔️ Telefon so‘rovi to‘xtatilgan: ${untilText(state.phoneCooldownUntil)} gacha` : '✅ Telefon so‘rovi ochiq',
+      `Telefon: oxirgi soatda ${phones}/${PROT.phone_per_hour}`,
+      `Cheklovlar (oxirgi ${PROT.strike_window_hours} soat): ${strikes}`,
+    ].join('\n'), parse_mode: 'HTML' });
+  }
   await tg('sendMessage', { chat_id: uid, ...menu() });
 }
 
