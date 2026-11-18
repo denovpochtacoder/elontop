@@ -2,9 +2,9 @@
 // adminga rasm + tugmalar bilan yuboradi, "Kanalga chiqarish" bosilsa kanalga joylaydi.
 // Ishga tushirish: run-bot.cmd (token bot-token.txt faylidan o'qiladi).
 import { readFile, writeFile, rename } from 'node:fs/promises';
-import { fetchOffers, usdRate, normalize, fetchPhone, norm } from './botlib/olx.mjs';
+import { fetchOffers, usdRate, normalize, fetchPhone, norm, olxStats } from './botlib/olx.mjs';
 import { cyr, formatPhone, phonesFromText, positionFrom, paintClean } from './botlib/text.mjs';
-import { evaluate } from './botlib/market.mjs';
+import { evaluate, periodStart } from './botlib/market.mjs';
 
 const here = (f) => new URL('./' + f, import.meta.url);
 const cfg = JSON.parse(await readFile(here('bot-config.json'), 'utf8'));
@@ -97,8 +97,8 @@ function options(kind) {
 
 // ---------- Matnlar ----------
 function level(d) {
-  if (d >= 20) return '🔥 JUDA ARZON';
-  if (d >= 10) return '✅ ARZON';
+  if (d >= 10) return '🔥 JUDA ARZON';
+  if (d >= 6) return '✅ ARZON';
   return '🟡 BIROZ ARZON';
 }
 function when(ts) {
@@ -175,7 +175,7 @@ async function ensurePhone(card) {
 }
 
 // ---------- OLX'dan bloklanmaslik uchun himoya ----------
-const PROT = { cooldown_steps_minutes: [120, 1440, 2880], strike_window_hours: 72, cache_minutes: 10, phone_per_hour: 10, ...cfg.protection };
+const PROT = { cooldown_steps_minutes: [120, 1440, 2880], strike_window_hours: 72, cache_minutes: 10, market_cache_hours: 6, phone_per_hour: 10, ...cfg.protection };
 const isLimit = (e) => e?.status === 403 || e?.status === 429;
 const untilText = (ts) => {
   const long = ts - Date.now() > 12 * 3600e3;
@@ -195,7 +195,7 @@ async function startCooldown(kind) {
   console.warn(`OLX cheklov qo'ydi (${kind}, ${state.strikes.length}-marta), ${untilText(until)} gacha to'xtatildi`);
   return until;
 }
-const fetchCache = new Map(); // so'rov kaliti -> { at, raw }: bir xil qidiruv qisqa vaqtda takrorlansa
+const marketCache = new Map(); // model+yil -> { at, recentAt, coveredDays, byId, regional }: bozor narxi uchun saqlangan e'lonlar
 
 let busy = false;
 let lastSearch = null; // { results, modelName }: "yana ko'rsatish" va "qayta ko'rsatish" uchun
@@ -241,21 +241,40 @@ async function search(chatId) {
   try {
     // Yil chegarasini 1 yilga kengroq so'raymiz: solishtirish yili ±1 bo'yicha
     const yr = { yearFrom: c.yearFrom ? c.yearFrom - 1 : 0, yearTo: c.yearTo ? c.yearTo + 1 : 0 };
-    const key = JSON.stringify([c.model.query, yr, c.regionId]);
-    const cached = fetchCache.get(key);
-    let raw;
+    const nowTs = Date.now();
+    const since = periodStart(c.days, nowTs);
+    const periodOpts = { ...yr, sinceTs: since };
+    const maxP = cfg.max_pages_period ?? 10;
+    const reqBefore = olxStats.requests;
+    const mkey = JSON.stringify([c.model.query, yr]);
+    let market = marketCache.get(mkey);
     let fromCache = false;
-    if (cached && Date.now() - cached.at < PROT.cache_minutes * 60e3) {
-      raw = cached.raw;
-      fromCache = true;
+    if (!market || nowTs - market.at > PROT.market_cache_hours * 3600e3) {
+      // Bozor narxi uchun butun mamlakat bo'yicha ko'p sahifa (kuniga bir necha marta)
+      const list = await fetchOffers(c.model.query, maxP, { ...periodOpts, minPages: cfg.max_pages });
+      market = { at: nowTs, recentAt: nowTs, coveredDays: c.days, byId: new Map(list.map((x) => [x.id, x])), regional: new Map() };
+      marketCache.set(mkey, market);
+    } else if (nowTs - market.recentAt > PROT.cache_minutes * 60e3 || c.days > market.coveredDays) {
+      // Faqat tanlangan davrdagi yangi e'lonlar: davr tugashi bilan to'xtaydi
+      const list = await fetchOffers(c.model.query, maxP, periodOpts);
+      for (const x of list) market.byId.set(x.id, x);
+      market.recentAt = nowTs;
+      market.coveredDays = Math.max(market.coveredDays, c.days);
     } else {
-      raw = await fetchOffers(c.model.query, cfg.max_pages, yr); // butun mamlakat: bozor narxi uchun
-      if (c.regionId) { // tanlangan viloyat e'lonlari alohida so'raladi
-        const regional = await fetchOffers(c.model.query, cfg.region_pages, { ...yr, regionId: c.regionId });
-        raw = [...new Map([...regional, ...raw].map((a) => [a.id, a])).values()];
-      }
-      fetchCache.set(key, { at: Date.now(), raw });
+      fromCache = true;
     }
+    let raw = [...market.byId.values()];
+    if (c.regionId) { // tanlangan viloyat e'lonlari alohida so'raladi
+      const rk = `${c.regionId}:${c.days}`;
+      let reg = market.regional.get(rk);
+      if (!reg || nowTs - reg.at > PROT.cache_minutes * 60e3) {
+        reg = { at: nowTs, list: await fetchOffers(c.model.query, maxP, { ...periodOpts, regionId: c.regionId }) };
+        market.regional.set(rk, reg);
+        fromCache = false;
+      }
+      raw = [...new Map([...reg.list, ...raw].map((x) => [x.id, x])).values()];
+    }
+    const used = olxStats.requests - reqBefore;
     const rate = usdRate(raw, cfg.usd_rate_fallback);
     const ads = raw.map((a) => normalize(a, rate));
     const { stats, results } = evaluate(ads, c, { minComparables: cfg.min_comparables });
@@ -277,7 +296,7 @@ async function search(chatId) {
       stats.noComparables ? `Solishtirishga o‘xshashi kam: ${stats.noComparables}` : null,
       `Kamida ${c.minDiscount}% arzon: ${results.length}, yangi: ${fresh.length}`,
       verdict,
-      fromCache ? `ℹ️ ${PROT.cache_minutes} daqiqa ichidagi natija ishlatildi, OLX'ga qayta so‘rov yuborilmadi.` : null,
+      fromCache ? `ℹ️ Saqlangan natija ishlatildi: OLX'ga so‘rov yuborilmadi.` : `ℹ️ OLX'ga ${used} ta so‘rov yuborildi.`,
     ].filter(Boolean).join('\n');
     await tg('editMessageText', { chat_id: chatId, message_id: status.message_id, text: summary, parse_mode: 'HTML' });
 

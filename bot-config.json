@@ -200,11 +200,12 @@
     7
   ],
   "discounts": [
+    3,
     5,
+    6,
     10,
     15,
-    20,
-    30
+    20
   ],
   "defaults": {
     "model": 0,
@@ -212,7 +213,7 @@
     "km": 3,
     "region": 0,
     "days": 3,
-    "discount": 10
+    "discount": 3
   },
   "region_pages": 4,
   "protection": {
@@ -223,6 +224,8 @@
     ],
     "strike_window_hours": 72,
     "cache_minutes": 10,
-    "phone_per_hour": 10
-  }
+    "phone_per_hour": 10,
+    "market_cache_hours": 6
+  },
+  "max_pages_period": 10
 }

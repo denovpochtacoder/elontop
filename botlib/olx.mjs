@@ -10,7 +10,10 @@ const HEADERS = {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+export const olxStats = { requests: 0 }; // OLX'ga yuborilgan so'rovlar soni
+
 async function getJson(url) {
+  olxStats.requests++;
   const res = await fetch(url, { headers: HEADERS });
   if (!res.ok) { const e = new Error(`OLX HTTP ${res.status}`); e.status = res.status; throw e; }
   return res.json();
@@ -18,7 +21,7 @@ async function getJson(url) {
 
 // query bo'yicha maxPages sahifagacha e'lon oladi (har sahifa ~40-50 ta), faqat avtomobil bo'limidan.
 // opts: regionId (OLX viloyat ID), yearFrom/yearTo (yil chegarasi), file (internetsiz sinov uchun JSON).
-export async function fetchOffers(query, maxPages, { file, regionId, yearFrom, yearTo } = {}) {
+export async function fetchOffers(query, maxPages, { file, regionId, yearFrom, yearTo, sinceTs, minPages = 1 } = {}) {
   if (file) return JSON.parse(await readFile(file, 'utf8')).data ?? [];
   const build = (withYearTo) => `https://www.olx.uz/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(query)}`
     + `&category_id=${CAR_CATEGORY}&sort_by=created_at%3Adesc`
@@ -30,13 +33,17 @@ export async function fetchOffers(query, maxPages, { file, regionId, yearFrom, y
     await sleep(1200);
     first = await getJson(build(false));
   }
+  // sinceTs berilsa: sahifada sinceTs'dan yangi e'lon qolmaganda to'xtaymiz (minPages dan keyin)
+  const fresh = (list) => !sinceTs || list.some((a) => !a.created_time || Date.parse(a.created_time) >= sinceTs);
   const all = [...(first.data ?? [])];
   let next = first.links?.next?.href ?? null;
-  for (let page = 1; next && page < maxPages; page++) {
+  let more = 1 < minPages || fresh(first.data ?? []);
+  for (let page = 1; next && more && page < maxPages; page++) {
     await sleep(1200);
     const j = await getJson(next);
     all.push(...(j.data ?? []));
     next = j.links?.next?.href ?? null;
+    more = page + 1 < minPages || fresh(j.data ?? []);
   }
   // sahifalar bir-biriga biroz kirishadi: takrorlarni olib tashlaymiz
   return [...new Map(all.map((a) => [a.id, a])).values()];
