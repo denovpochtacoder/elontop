@@ -140,66 +140,95 @@ function channelCaption(card) {
   if (!card.phone) lines.push(`🔗 <a href="${esc(a.url)}">Манба: OLX</a>`); // telefon topilmasa, havola
   return lines.join('\n');
 }
-// ---------- Albom (bir nechta rasm, matn birinchi rasm tagida) ----------
+// ---------- Karta ko'rinishi: karusel yoki albom ----------
+// card.view: 'carousel' (bitta xabar, rasmlar suriladi) | 'album' (rasmlar guruhi + "E'lon amallari" xabari)
+// card.text: 'admin' (tahlil) | 'channel' (kanal shabloni, oldindan ko'rish)
+// card.msgs: { kind: 'rich'|'photo'|'text'|'album', main, album: [], actions }
 const photosOf = (card) => (card.ad.photos?.length ? card.ad.photos : card.ad.photo ? [card.ad.photo] : []);
-// Albom yuboradi; bo'lmasa bitta rasm, u ham bo'lmasa matn. Yuborilgan xabarlar id'larini qaytaradi.
-async function sendPost(chatId, card, caption) {
-  const photos = photosOf(card);
-  if (photos.length > 1) {
-    try {
-      const media = photos.map((url, i) => ({ type: 'photo', media: url, ...(i === 0 ? { caption, parse_mode: 'HTML' } : {}) }));
-      const msgs = await tg('sendMediaGroup', { chat_id: chatId, media });
-      return msgs.map((x) => x.message_id);
-    } catch (e) { console.warn('Albom yuborilmadi, bitta rasm yuboriladi:', e.message); }
+const isDone = (card) => state.published.includes(card.ad.id) || card.skipped;
+function textOf(card) {
+  if (card.text === 'channel') return channelCaption(card);
+  const note = state.published.includes(card.ad.id) ? '✅ <b>Kanalga chiqarildi</b>' : card.skipped ? '❌ O‘tkazib yuborildi' : '';
+  return adminCaption(card, note);
+}
+function keyboard(card) {
+  const id = card.ad.id;
+  const view = { text: '🔗 Asl e‘lon', url: card.ad.url };
+  if (isDone(card)) return { inline_keyboard: [[view]] };
+  const row1 = [btn('✅ Kanalga chiqarish', `pub:${id}`)];
+  if (photosOf(card).length > 1) row1.push(card.view === 'album' ? btn('🎠 Karuselda ko‘rish', `car:${id}`) : btn('🖼 Albomda ko‘rish', `alb:${id}`));
+  const row2 = [card.text === 'channel' ? btn('⬅️ Qaytish', `back:${id}`) : btn('👁 Oldindan ko‘rish', `prev:${id}`), view];
+  return { inline_keyboard: [row1, row2, [btn('❌ O‘tkazish', `skip:${id}`)]] };
+}
+// Oddiy HTML matn -> rich message HTML: bo'sh qator = yangi paragraf, qator = <br/>
+const richParas = (html) => html.split(/\n{2,}/).map((p) => '<p>' + p.split('\n').join('<br/>') + '</p>').join('');
+function richHtml(card, html) {
+  const ph = photosOf(card);
+  const media = ph.length > 1 ? '<tg-slideshow>' + ph.map((u) => '<img src="' + esc(u) + '"/>').join('') + '</tg-slideshow>'
+    : ph.length ? '<img src="' + esc(ph[0]) + '"/>' : '';
+  return media + richParas(html);
+}
+// Albom: 10 tagacha rasm, matn birinchi rasm tagida. Xabar id'larini qaytaradi.
+async function sendAlbum(chatId, card, caption) {
+  const ph = photosOf(card);
+  if (ph.length > 1) {
+    const msgs = await tg('sendMediaGroup', { chat_id: chatId, media: ph.map((url, i) => ({ type: 'photo', media: url, ...(i === 0 ? { caption, parse_mode: 'HTML' } : {}) })) });
+    return msgs.map((x) => x.message_id);
   }
-  if (photos.length) {
-    try { return [(await tg('sendPhoto', { chat_id: chatId, photo: photos[0], caption, parse_mode: 'HTML' })).message_id]; }
-    catch (e) { console.warn('Rasm yuborilmadi:', e.message); }
-  }
+  if (ph.length) return [(await tg('sendPhoto', { chat_id: chatId, photo: ph[0], caption, parse_mode: 'HTML' })).message_id];
   return [(await tg('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', link_preview_options: { is_disabled: true } })).message_id];
 }
-// Oldindan ko'rish albomini o'chiradi
-async function clearPreview(card, chatId) {
-  for (const mid of card.previewMsgs ?? []) await tg('deleteMessage', { chat_id: chatId, message_id: mid }).catch(() => {});
-  card.previewMsgs = [];
-}
-
-// Karusel: ◀️ 2/7 ▶️ tugmalari (prefix: 'ph' admin oldindan ko'rishi, 'cr' kanal posti)
-function navRow(card, idx, prefix) {
-  const n = photosOf(card).length;
-  if (n < 2) return [];
-  const prev = (idx - 1 + n) % n, next = (idx + 1) % n;
-  return [[btn('◀️', `${prefix}:${card.ad.id}:${prev}`), btn(`${idx + 1}/${n}`, `${prefix}:${card.ad.id}:${idx}`), btn('▶️', `${prefix}:${card.ad.id}:${next}`)]];
-}
-function previewKeyboard(card, idx = 0) {
-  const id = card.ad.id;
-  const rows = [...navRow(card, idx, 'ph'), [btn('⬅️ Qaytish', `back:${id}`), btn('📢 Kanalga (albom)', `pub:${id}`)]];
-  if (photosOf(card).length > 1) rows.push([btn('🎠 Kanalga (karusel)', `pubc:${id}`)]);
-  return { inline_keyboard: rows };
-}
-const carouselKeyboard = (card, idx = 0) => ({ inline_keyboard: navRow(card, idx, 'cr') });
-// Xabarning o'zini boshqa rasm + matn bilan almashtiradi (rasmsiz xabarda faqat matn)
-async function showOnMessage(m, card, idx, caption, reply_markup) {
-  const url = photosOf(card)[idx];
-  if (m.photo && url) {
-    try {
-      return await tg('editMessageMedia', { chat_id: m.chat.id, message_id: m.message_id, media: { type: 'photo', media: url, caption, parse_mode: 'HTML' }, reply_markup });
-    } catch (e) {
-      if (/not modified/i.test(e.message)) return;
-      console.warn('Rasm almashmadi:', e.message);
-    }
+// Karusel xabari: avval rich message, bo'lmasa bitta rasm, u ham bo'lmasa matn
+async function sendCarousel(chatId, card, html, reply_markup) {
+  try {
+    const r = await tg('sendRichMessage', { chat_id: chatId, rich_message: { html: richHtml(card, html) }, ...(reply_markup ? { reply_markup } : {}) });
+    return { kind: 'rich', main: r.message_id };
+  } catch (e) { console.warn('Karusel (rich message) yuborilmadi, oddiy rasm yuboriladi:', e.message); }
+  const ph = photosOf(card);
+  if (ph.length) {
+    try { return { kind: 'photo', main: (await tg('sendPhoto', { chat_id: chatId, photo: ph[0], caption: html, parse_mode: 'HTML', ...(reply_markup ? { reply_markup } : {}) })).message_id }; }
+    catch (e) { console.warn('Rasm yuborilmadi:', e.message); }
   }
-  if (m.photo) return tg('editMessageCaption', { chat_id: m.chat.id, message_id: m.message_id, caption, parse_mode: 'HTML', reply_markup }).catch(() => {});
-  return tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, text: caption, parse_mode: 'HTML', reply_markup, link_preview_options: { is_disabled: true } }).catch(() => {});
+  return { kind: 'text', main: (await tg('sendMessage', { chat_id: chatId, text: html, parse_mode: 'HTML', link_preview_options: { is_disabled: true }, ...(reply_markup ? { reply_markup } : {}) })).message_id };
 }
-
-// mode: 'card' (yangi karta), 'preview' (oldindan ko'rish), 'done' (chiqarilgan yoki o'tkazilgan)
-function cardKeyboard(card, mode = 'card') {
-  const id = card.ad.id;
-  const view = { text: '🔗 Ko‘rish', url: card.ad.url };
-  if (mode === 'preview') return { inline_keyboard: [[btn('⬅️ Qaytish', `back:${id}`), btn('📢 Kanalga chiqarish', `pub:${id}`)]] };
-  if (mode === 'done') return { inline_keyboard: [[view]] };
-  return { inline_keyboard: [[view, btn('👁 Oldindan ko‘rish', `prev:${id}`)], [btn('📢 Kanalga chiqarish', `pub:${id}`), btn('❌ O‘tkazish', `skip:${id}`)]] };
+// Kartani yangidan chizadi (card.view bo'yicha)
+async function renderCard(chatId, card) {
+  if (card.view === 'album' && photosOf(card).length > 1) {
+    try {
+      const album = await sendAlbum(chatId, card, textOf(card));
+      const act = await tg('sendMessage', { chat_id: chatId, text: '🖼 E‘lon amallari', reply_parameters: { message_id: album[0], allow_sending_without_reply: true }, reply_markup: keyboard(card) });
+      card.msgs = { kind: 'album', album, actions: act.message_id };
+      return;
+    } catch (e) { console.warn('Albom yuborilmadi, karusel yuboriladi:', e.message); card.view = 'carousel'; }
+  }
+  card.view = 'carousel';
+  card.msgs = await sendCarousel(chatId, card, textOf(card), keyboard(card));
+}
+async function clearCard(chatId, card) {
+  const ids = card.msgs?.kind === 'album' ? [...card.msgs.album, card.msgs.actions] : [card.msgs?.main];
+  for (const id of ids.filter(Boolean)) await tg('deleteMessage', { chat_id: chatId, message_id: id }).catch(() => {});
+}
+// Matn yoki tugmalar o'zgarganda kartani joyida yangilaydi
+async function refreshCard(chatId, card) {
+  const m = card.msgs ?? {};
+  const html = textOf(card), reply_markup = keyboard(card);
+  try {
+    if (m.kind === 'album') {
+      await tg('editMessageCaption', { chat_id: chatId, message_id: m.album[0], caption: html, parse_mode: 'HTML' }).catch((e) => { if (!/not modified/i.test(e.message)) throw e; });
+      await tg('editMessageReplyMarkup', { chat_id: chatId, message_id: m.actions, reply_markup });
+    } else if (m.kind === 'rich') {
+      await tg('editMessageText', { chat_id: chatId, message_id: m.main, rich_message: { html: richHtml(card, html) }, reply_markup });
+    } else if (m.kind === 'photo') {
+      await tg('editMessageCaption', { chat_id: chatId, message_id: m.main, caption: html, parse_mode: 'HTML', reply_markup });
+    } else {
+      await tg('editMessageText', { chat_id: chatId, message_id: m.main, text: html, parse_mode: 'HTML', reply_markup, link_preview_options: { is_disabled: true } });
+    }
+  } catch (e) {
+    if (/not modified/i.test(e.message)) return;
+    console.warn('Karta yangilanmadi, qayta yuboriladi:', e.message);
+    await clearCard(chatId, card);
+    await renderCard(chatId, card);
+  }
 }
 
 // Telefon: avval OLX so'rovi, bo'lmasa e'lon matnidan. Bir marta urinadi.
@@ -259,13 +288,8 @@ async function sendCards(chatId, list, modelName) {
     const card = { ...r, ...(state.cards[r.ad.id] ? { phone: state.cards[r.ad.id].phone, phoneTried: state.cards[r.ad.id].phoneTried } : {}), modelName };
     state.cards[r.ad.id] = card;
     if (!state.shown.includes(r.ad.id)) state.shown.push(r.ad.id);
-    const caption = adminCaption(card);
-    try {
-      if (r.ad.photo) await tg('sendPhoto', { chat_id: chatId, photo: r.ad.photo, caption, parse_mode: 'HTML', reply_markup: cardKeyboard(card) });
-      else throw new Error('rasm yo‘q');
-    } catch (e) {
-      await tg('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', reply_markup: cardKeyboard(card), link_preview_options: { is_disabled: true } });
-    }
+    card.view = 'carousel'; card.text = 'admin'; card.skipped = false;
+    await renderCard(chatId, card);
     await sleep(400);
   }
   await save();
@@ -380,29 +404,22 @@ async function showMore(chatId, again) {
 }
 
 // ---------- Kanalga chiqarish ----------
-async function publish(cq, id, style = 'album') {
-  const card = state.cards[id];
-  if (!card) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'E‘lon ma‘lumoti topilmadi, qayta qidiring', show_alert: true });
+async function publish(cq, card) {
+  const id = card.ad.id;
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
   await ensurePhone(card);
   const caption = channelCaption(card);
-  if (style === 'carousel' && photosOf(card).length > 1) {
-    await tg('sendPhoto', { chat_id: cfg.channel_id, photo: photosOf(card)[0], caption, parse_mode: 'HTML', reply_markup: carouselKeyboard(card, 0) });
+  if (card.view === 'album' && photosOf(card).length > 1) {
+    try { await sendAlbum(cfg.channel_id, card, caption); }
+    catch (e) { console.warn('Kanalga albom chiqmadi, karusel bilan chiqariladi:', e.message); await sendCarousel(cfg.channel_id, card, caption); }
   } else {
-    await sendPost(cfg.channel_id, card, caption);
+    await sendCarousel(cfg.channel_id, card, caption);
   }
-  await clearPreview(card, cq.message.chat.id);
   state.published.push(id);
+  card.text = 'admin';
+  await refreshCard(cq.message.chat.id, card);
   await save();
-  await showOnMessage(cq.message, card, 0, adminCaption(card, `✅ <b>Kanalga chiqarildi</b> (${style === 'carousel' ? 'karusel' : 'albom'})`), cardKeyboard(card, 'done'));
-  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Kanalga chiqarildi ✅' });
-}
-
-// Kartadagi matn va tugmalarni almashtiradi (rasmli xabarda caption, rasmsizda text)
-async function editCard(cq, caption, reply_markup) {
-  const m = cq.message;
-  if (m.photo) await tg('editMessageCaption', { chat_id: m.chat.id, message_id: m.message_id, caption, parse_mode: 'HTML', reply_markup });
-  else await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, text: caption, parse_mode: 'HTML', reply_markup, link_preview_options: { is_disabled: true } });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: `Kanalga chiqarildi (${card.view === 'album' ? 'albom' : 'karusel'}) ✅` });
 }
 
 // ---------- Update'larni qayta ishlash ----------
@@ -441,12 +458,6 @@ async function onMessage(msg) {
 
 async function onCallback(cq) {
   const uid = cq.from.id;
-  if (cq.data?.startsWith('cr:')) { // kanaldagi karusel: rasmni almashtirish
-    const [, cid, ci] = cq.data.split(':');
-    const c = state.cards[cid];
-    if (c && cq.message) await showOnMessage(cq.message, c, Number(ci) || 0, channelCaption(c), carouselKeyboard(c, Number(ci) || 0));
-    return tg('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => {});
-  }
   if (!isAdmin(uid)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Faqat admin uchun' });
   const [cmd, a, b] = cq.data.split(':');
   const m = cq.message;
@@ -476,32 +487,38 @@ async function onCallback(cq) {
     if (!(await showMore(m.chat.id, cmd === 'again'))) await tg('sendMessage', { chat_id: m.chat.id, text: 'Bot qayta ishga tushgan, shuning uchun oldingi natija saqlanmagan. Qaytadan 🔍 Qidirish ni bosing.' });
     return;
   }
-  if (cmd === 'pub') return publish(cq, a);
-  if (cmd === 'pubc') return publish(cq, a, 'carousel');
-
   const card = state.cards[a];
   if (!card) return answer('E‘lon ma‘lumoti topilmadi, qayta qidiring', true);
+  const chatId = m.chat.id;
+  // Bot yangilanishidan oldingi kartalar: xabar ma'lumoti yo'q
+  if (!card.msgs) { card.msgs = { kind: m.photo ? 'photo' : 'text', main: m.message_id }; card.view = 'carousel'; card.text = 'admin'; }
+  if (cmd === 'pub') return publish(cq, card);
   if (cmd === 'prev') {
     await ensurePhone(card);
-    await clearPreview(card, m.chat.id);
+    card.text = 'channel';
+    await refreshCard(chatId, card);
     await save();
-    await showOnMessage(m, card, 0, channelCaption(card), previewKeyboard(card, 0));
     return answer(card.phone ? 'Kanalda shunday ko‘rinadi' : (card.phoneNote ? card.phoneNote + '. Postda OLX havolasi turadi' : 'Telefon topilmadi: postda OLX havolasi turadi'), !card.phone && !!card.phoneNote);
   }
-  if (cmd === 'ph') { // oldindan ko'rishda rasmni almashtirish
-    await showOnMessage(m, card, Number(b) || 0, channelCaption(card), previewKeyboard(card, Number(b) || 0));
+  if (cmd === 'back') {
+    card.text = 'admin';
+    await refreshCard(chatId, card);
+    await save();
     return answer();
   }
-  if (cmd === 'back') {
-    await clearPreview(card, m.chat.id);
+  if (cmd === 'alb' || cmd === 'car') { // ko'rinishni almashtirish: eski xabar o'chadi, o'rniga yangisi
+    await answer(cmd === 'alb' ? 'Albom ko‘rinishi' : 'Karusel ko‘rinishi');
+    await clearCard(chatId, card);
+    card.view = cmd === 'alb' ? 'album' : 'carousel';
+    await renderCard(chatId, card);
     await save();
-    await showOnMessage(m, card, 0, adminCaption(card), cardKeyboard(card, state.published.includes(a) ? 'done' : 'card'));
-    return answer();
+    return;
   }
   if (cmd === 'skip') {
-    await clearPreview(card, m.chat.id);
+    card.skipped = true;
+    card.text = 'admin';
+    await refreshCard(chatId, card);
     await save();
-    await showOnMessage(m, card, 0, adminCaption(card, '❌ O‘tkazib yuborildi'), cardKeyboard(card, 'done'));
     return answer('O‘tkazildi');
   }
   return answer();
