@@ -72,7 +72,8 @@ export function normalize(ad, rate) {
   const year = Number(param(ad, 'motor_year')?.key) || null;
   let km = Number(param(ad, 'motor_mileage')?.key) || null;
   if (km && km < 1000) km *= 1000; // "250" deb yozilgan = 250 000 km
-  const photo = ad.photos?.[0];
+  const photoUrl = (ph) => ph.link.replace('{width}', ph.width).replace('{height}', ph.height);
+  const photos = (ad.photos ?? []).filter((ph) => ph?.link).slice(0, 10).map(photoUrl); // albom uchun 10 tagacha rasm
   return {
     id: String(ad.id),
     url: ad.url,
@@ -94,7 +95,8 @@ export function normalize(ad, rate) {
     city: ad.location?.city?.name ?? null,
     district: ad.location?.district?.name ?? null,
     createdAt: ad.created_time ? Date.parse(ad.created_time) : null,
-    photo: photo ? photo.link.replace('{width}', photo.width).replace('{height}', photo.height) : null,
+    photo: photos[0] ?? null,
+    photos,
   };
 }
 

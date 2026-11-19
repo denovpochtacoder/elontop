@@ -140,6 +140,30 @@ function channelCaption(card) {
   if (!card.phone) lines.push(`🔗 <a href="${esc(a.url)}">Манба: OLX</a>`); // telefon topilmasa, havola
   return lines.join('\n');
 }
+// ---------- Albom (bir nechta rasm, matn birinchi rasm tagida) ----------
+const photosOf = (card) => (card.ad.photos?.length ? card.ad.photos : card.ad.photo ? [card.ad.photo] : []);
+// Albom yuboradi; bo'lmasa bitta rasm, u ham bo'lmasa matn. Yuborilgan xabarlar id'larini qaytaradi.
+async function sendPost(chatId, card, caption) {
+  const photos = photosOf(card);
+  if (photos.length > 1) {
+    try {
+      const media = photos.map((url, i) => ({ type: 'photo', media: url, ...(i === 0 ? { caption, parse_mode: 'HTML' } : {}) }));
+      const msgs = await tg('sendMediaGroup', { chat_id: chatId, media });
+      return msgs.map((x) => x.message_id);
+    } catch (e) { console.warn('Albom yuborilmadi, bitta rasm yuboriladi:', e.message); }
+  }
+  if (photos.length) {
+    try { return [(await tg('sendPhoto', { chat_id: chatId, photo: photos[0], caption, parse_mode: 'HTML' })).message_id]; }
+    catch (e) { console.warn('Rasm yuborilmadi:', e.message); }
+  }
+  return [(await tg('sendMessage', { chat_id: chatId, text: caption, parse_mode: 'HTML', link_preview_options: { is_disabled: true } })).message_id];
+}
+// Oldindan ko'rish albomini o'chiradi
+async function clearPreview(card, chatId) {
+  for (const mid of card.previewMsgs ?? []) await tg('deleteMessage', { chat_id: chatId, message_id: mid }).catch(() => {});
+  card.previewMsgs = [];
+}
+
 // mode: 'card' (yangi karta), 'preview' (oldindan ko'rish), 'done' (chiqarilgan yoki o'tkazilgan)
 function cardKeyboard(card, mode = 'card') {
   const id = card.ad.id;
@@ -333,12 +357,8 @@ async function publish(cq, id) {
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
   await ensurePhone(card);
   const caption = channelCaption(card);
-  if (card.ad.photo) {
-    try { await tg('sendPhoto', { chat_id: cfg.channel_id, photo: card.ad.photo, caption, parse_mode: 'HTML' }); }
-    catch { await tg('sendMessage', { chat_id: cfg.channel_id, text: caption, parse_mode: 'HTML' }); }
-  } else {
-    await tg('sendMessage', { chat_id: cfg.channel_id, text: caption, parse_mode: 'HTML' });
-  }
+  await sendPost(cfg.channel_id, card, caption);
+  await clearPreview(card, cq.message.chat.id);
   state.published.push(id);
   await save();
   await editCard(cq, adminCaption(card, '✅ <b>Kanalga chiqarildi</b>'), cardKeyboard(card, 'done'));
@@ -423,14 +443,21 @@ async function onCallback(cq) {
   if (!card) return answer('E‘lon ma‘lumoti topilmadi, qayta qidiring', true);
   if (cmd === 'prev') {
     await ensurePhone(card);
-    await editCard(cq, channelCaption(card), cardKeyboard(card, 'preview'));
+    await clearPreview(card, m.chat.id);
+    card.previewMsgs = await sendPost(m.chat.id, card, channelCaption(card));
+    await save();
+    await editCard(cq, adminCaption(card, `👇 Pastda kanaldagi ko‘rinishi (${photosOf(card).length} ta rasm)`), cardKeyboard(card, 'preview'));
     return answer(card.phone ? 'Kanalda shunday ko‘rinadi' : (card.phoneNote ? card.phoneNote + '. Postda OLX havolasi turadi' : 'Telefon topilmadi: postda OLX havolasi turadi'), !card.phone && !!card.phoneNote);
   }
   if (cmd === 'back') {
+    await clearPreview(card, m.chat.id);
+    await save();
     await editCard(cq, adminCaption(card), cardKeyboard(card, state.published.includes(a) ? 'done' : 'card'));
     return answer();
   }
   if (cmd === 'skip') {
+    await clearPreview(card, m.chat.id);
+    await save();
     await editCard(cq, adminCaption(card, '❌ O‘tkazib yuborildi'), cardKeyboard(card, 'done'));
     return answer('O‘tkazildi');
   }
