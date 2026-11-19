@@ -141,7 +141,7 @@ function channelCaption(card) {
   return lines.join('\n');
 }
 // ---------- Karta ko'rinishi: karusel yoki albom ----------
-// card.view: 'carousel' (bitta xabar, rasmlar suriladi) | 'album' (rasmlar guruhi + "E'lon amallari" xabari)
+// card.view: 'carousel' (rasmlar suriladi) | 'album' (kollaj: rasmlar setka bo'lib turadi). Ikkalasi ham bitta xabar.
 // card.text: 'admin' (tahlil) | 'channel' (kanal shabloni, oldindan ko'rish)
 // card.msgs: { kind: 'rich'|'photo'|'text'|'album', main, album: [], actions }
 const photosOf = (card) => (card.ad.photos?.length ? card.ad.photos : card.ad.photo ? [card.ad.photo] : []);
@@ -156,15 +156,16 @@ function keyboard(card) {
   const view = { text: '🔗 Asl e‘lon', url: card.ad.url };
   if (isDone(card)) return { inline_keyboard: [[view]] };
   const row1 = [btn('✅ Kanalga chiqarish', `pub:${id}`)];
-  if (photosOf(card).length > 1) row1.push(card.view === 'album' ? btn('🎠 Karuselda ko‘rish', `car:${id}`) : btn('🖼 Albomda ko‘rish', `alb:${id}`));
+  if (photosOf(card).length > 1) row1.push(card.view === 'album' ? btn('🎠 Karuselda ko‘rish', `car:${id}`) : btn('🖼 Kollajda ko‘rish', `alb:${id}`));
   const row2 = [card.text === 'channel' ? btn('⬅️ Qaytish', `back:${id}`) : btn('👁 Oldindan ko‘rish', `prev:${id}`), view];
-  return { inline_keyboard: [row1, row2, [btn('❌ O‘tkazish', `skip:${id}`)]] };
+  return { inline_keyboard: [row1, row2] };
 }
 // Oddiy HTML matn -> rich message HTML: bo'sh qator = yangi paragraf, qator = <br/>
 const richParas = (html) => html.split(/\n{2,}/).map((p) => '<p>' + p.split('\n').join('<br/>') + '</p>').join('');
 function richHtml(card, html) {
   const ph = photosOf(card);
-  const media = ph.length > 1 ? '<tg-slideshow>' + ph.map((u) => '<img src="' + esc(u) + '"/>').join('') + '</tg-slideshow>'
+  const tagName = card.view === 'album' ? 'tg-collage' : 'tg-slideshow';
+  const media = ph.length > 1 ? `<${tagName}>` + ph.map((u) => '<img src="' + esc(u) + '"/>').join('') + `</${tagName}>`
     : ph.length ? '<img src="' + esc(ph[0]) + '"/>' : '';
   return media + richParas(html);
 }
@@ -183,8 +184,11 @@ async function sendCarousel(chatId, card, html, reply_markup) {
   try {
     const r = await tg('sendRichMessage', { chat_id: chatId, rich_message: { html: richHtml(card, html) }, ...(reply_markup ? { reply_markup } : {}) });
     return { kind: 'rich', main: r.message_id };
-  } catch (e) { console.warn('Karusel (rich message) yuborilmadi, oddiy rasm yuboriladi:', e.message); }
+  } catch (e) { console.warn('Karusel/kollaj (rich message) yuborilmadi, oddiy rasm yuboriladi:', e.message); }
   const ph = photosOf(card);
+  if (!reply_markup && card.view === 'album' && ph.length > 1) {
+    try { return { kind: 'album', album: await sendAlbum(chatId, card, html) }; } catch (e) { console.warn('Albom yuborilmadi:', e.message); }
+  }
   if (ph.length) {
     try { return { kind: 'photo', main: (await tg('sendPhoto', { chat_id: chatId, photo: ph[0], caption: html, parse_mode: 'HTML', ...(reply_markup ? { reply_markup } : {}) })).message_id }; }
     catch (e) { console.warn('Rasm yuborilmadi:', e.message); }
@@ -193,15 +197,6 @@ async function sendCarousel(chatId, card, html, reply_markup) {
 }
 // Kartani yangidan chizadi (card.view bo'yicha)
 async function renderCard(chatId, card) {
-  if (card.view === 'album' && photosOf(card).length > 1) {
-    try {
-      const album = await sendAlbum(chatId, card, textOf(card));
-      const act = await tg('sendMessage', { chat_id: chatId, text: '🖼 E‘lon amallari', reply_parameters: { message_id: album[0], allow_sending_without_reply: true }, reply_markup: keyboard(card) });
-      card.msgs = { kind: 'album', album, actions: act.message_id };
-      return;
-    } catch (e) { console.warn('Albom yuborilmadi, karusel yuboriladi:', e.message); card.view = 'carousel'; }
-  }
-  card.view = 'carousel';
   card.msgs = await sendCarousel(chatId, card, textOf(card), keyboard(card));
 }
 async function clearCard(chatId, card) {
@@ -409,17 +404,12 @@ async function publish(cq, card) {
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
   await ensurePhone(card);
   const caption = channelCaption(card);
-  if (card.view === 'album' && photosOf(card).length > 1) {
-    try { await sendAlbum(cfg.channel_id, card, caption); }
-    catch (e) { console.warn('Kanalga albom chiqmadi, karusel bilan chiqariladi:', e.message); await sendCarousel(cfg.channel_id, card, caption); }
-  } else {
-    await sendCarousel(cfg.channel_id, card, caption);
-  }
+  await sendCarousel(cfg.channel_id, card, caption);
   state.published.push(id);
   card.text = 'admin';
   await refreshCard(cq.message.chat.id, card);
   await save();
-  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: `Kanalga chiqarildi (${card.view === 'album' ? 'albom' : 'karusel'}) ✅` });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: `Kanalga chiqarildi (${card.view === 'album' ? 'kollaj' : 'karusel'}) ✅` });
 }
 
 // ---------- Update'larni qayta ishlash ----------
@@ -506,20 +496,13 @@ async function onCallback(cq) {
     await save();
     return answer();
   }
-  if (cmd === 'alb' || cmd === 'car') { // ko'rinishni almashtirish: eski xabar o'chadi, o'rniga yangisi
-    await answer(cmd === 'alb' ? 'Albom ko‘rinishi' : 'Karusel ko‘rinishi');
-    await clearCard(chatId, card);
+  if (cmd === 'alb' || cmd === 'car') { // ko'rinishni almashtirish: postning o'zi tahrirlanadi
+    await answer(cmd === 'alb' ? 'Kollaj ko‘rinishi' : 'Karusel ko‘rinishi');
     card.view = cmd === 'alb' ? 'album' : 'carousel';
-    await renderCard(chatId, card);
+    if (card.msgs?.kind === 'rich') await refreshCard(chatId, card);
+    else { await clearCard(chatId, card); await renderCard(chatId, card); } // eski turdagi karta
     await save();
     return;
-  }
-  if (cmd === 'skip') {
-    card.skipped = true;
-    card.text = 'admin';
-    await refreshCard(chatId, card);
-    await save();
-    return answer('O‘tkazildi');
   }
   return answer();
 }
