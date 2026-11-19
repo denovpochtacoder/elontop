@@ -122,11 +122,19 @@ function adminCaption(card, extra = '') {
 }
 // Kanalga chiqadigan post (kirill shablon)
 const comma = (n) => Math.round(n).toLocaleString('en-US');
+// OLX: "Avtomatik" / "Mexanik" -> kanal uchun kirillda
+function gearboxText(label) {
+  if (!label) return '';
+  if (/avto|авто|automat/i.test(label)) return 'Автомат';
+  if (/mex|мех|manual/i.test(label)) return 'Механика';
+  return esc(cyr(label));
+}
 function channelCaption(card) {
   const a = card.ad;
   const text = `${a.title} ${a.description ?? ''}`;
   const pos = positionFrom(text);
-  const lines = [`${tag(a.modelLabel || card.modelName)}${pos ? ` ${pos}-позиция` : ''} сотилади`, '', `📅 йили: ${a.year}`];
+  const gear = gearboxText(a.gearbox);
+  const lines = [`${tag(a.modelLabel || card.modelName)}${gear ? ` ${gear}` : ''}${pos ? ` ${pos}-позиция` : ''} сотилади`, '', `📅 йили: ${a.year}`];
   if (a.km) lines.push(`👣 пробег: ${comma(a.km)} км`);
   if (paintClean(text)) lines.push('💎 краскаси тоза');
   if (a.color) lines.push(`🎨 ранги: ${esc(cyr(a.color).toLowerCase())}`);
@@ -154,7 +162,7 @@ function textOf(card) {
 function keyboard(card) {
   const id = card.ad.id;
   const view = { text: '🔗 Asl e‘lon', url: card.ad.url };
-  if (isDone(card)) return { inline_keyboard: [[view]] };
+  if (isDone(card)) return { inline_keyboard: [[view, ...(card.channelUrl ? [{ text: '📢 Kanaldagi post', url: card.channelUrl }] : [])]] };
   const row1 = [btn('✅ Kanalga chiqarish', `pub:${id}`)];
   if (photosOf(card).length > 1) row1.push(card.view === 'album' ? btn('🎠 Karuselda ko‘rish', `car:${id}`) : btn('🖼 Kollajda ko‘rish', `alb:${id}`));
   const row2 = [card.text === 'channel' ? btn('⬅️ Qaytish', `back:${id}`) : btn('👁 Oldindan ko‘rish', `prev:${id}`), view];
@@ -404,7 +412,9 @@ async function publish(cq, card) {
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
   await ensurePhone(card);
   const caption = channelCaption(card);
-  await sendCarousel(cfg.channel_id, card, caption);
+  const sent = await sendCarousel(cfg.channel_id, card, caption);
+  const postId = sent.main ?? sent.album?.[0];
+  if (postId) card.channelUrl = channelLink(postId);
   state.published.push(id);
   card.text = 'admin';
   await refreshCard(cq.message.chat.id, card);
@@ -509,6 +519,12 @@ async function onCallback(cq) {
 
 // ---------- Asosiy sikl (long polling) ----------
 const me = await tg('getMe');
+// Kanal manzili (t.me/arzonelonkanal/123 havolasi uchun)
+const channelInfo = await tg('getChat', { chat_id: cfg.channel_id }).catch(() => null);
+function channelLink(msgId) {
+  if (channelInfo?.username) return `https://t.me/${channelInfo.username}/${msgId}`;
+  return `https://t.me/c/${String(cfg.channel_id).replace(/^-100/, '')}/${msgId}`;
+}
 await tg('deleteWebhook'); // tgcloud webhook'i bo'lsa, o'chiriladi (aks holda getUpdates ishlamaydi)
 console.log(`@${me.username} ishga tushdi. Adminlar: ${state.admins.join(', ') || 'hali yo‘q (birinchi /start yozgan admin bo‘ladi)'}`);
 
