@@ -19,8 +19,11 @@ export function modelMatches(ad, model) {
 function comparables(a, pool, minN) {
   let c = pool.filter((b) => b.id !== a.id && Math.abs(b.year - a.year) <= 1);
   if (a.km) {
-    const near = c.filter((b) => b.km && Math.abs(b.km - a.km) <= 50000);
-    if (near.length >= minN) c = near;
+    const WIDE_KM = 50000, TIGHT_KM = 30000, TIGHT_MIN = 12;
+    const tight = c.filter((b) => b.km && Math.abs(b.km - a.km) <= TIGHT_KM);
+    const wide = c.filter((b) => b.km && Math.abs(b.km - a.km) <= WIDE_KM);
+    if (tight.length >= TIGHT_MIN) c = tight;
+    else if (wide.length >= minN) c = wide;
   }
   if (a.condition) {
     const same = c.filter((b) => b.condition === a.condition);
