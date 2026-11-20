@@ -14,7 +14,12 @@ if (!TOKEN) { console.error('BOT_TOKEN yo‘q (bot-token.txt faylini tekshiring)
 // ---------- Holat (state.json) ----------
 let state = { offset: 0, admins: [], filters: { ...cfg.defaults }, cards: {}, published: [], shown: [], cooldownUntil: 0, phoneCooldownUntil: 0, phoneLog: [], strikes: [] };
 try { state = { ...state, ...JSON.parse(await readFile(here('state.json'), 'utf8')) }; } catch {}
-async function save() {
+let saving = Promise.resolve();
+function save() { // yozishlar navbat bilan (parallel ishlovchilar uchun)
+  saving = saving.then(writeState).catch((e) => console.warn('state.json yozilmadi:', e.message));
+  return saving;
+}
+async function writeState() {
   const ids = Object.keys(state.cards);
   if (ids.length > 300) for (const id of ids.slice(0, ids.length - 300)) delete state.cards[id];
   state.published = state.published.slice(-2000);
@@ -426,6 +431,11 @@ async function showMore(chatId, again) {
 async function publish(cq, card) {
   const id = card.ad.id;
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
+  if (card.publishing) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Chiqarilyapti, kuting' });
+  card.publishing = true;
+  try { await publishNow(cq, card, id); } finally { delete card.publishing; }
+}
+async function publishNow(cq, card, id) {
   await ensurePhone(card);
   const caption = channelCaption(card);
   // Kanalga oddiy albom (rich message emas): har qanday admin Premiumsiz tahrirlay oladi, nusxalash buzilmaydi
@@ -487,24 +497,24 @@ async function onCallback(cq) {
   const m = cq.message;
   const answer = (text, alert = false) => tg('answerCallbackQuery', { callback_query_id: cq.id, ...(text ? { text, show_alert: alert } : {}) });
   if (cmd === 'menu') {
-    await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
-    return answer();
+    answer().catch(() => {});
+    return tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
   }
   if (cmd === 'set') {
-    await tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options(a) } });
-    return answer();
+    answer().catch(() => {});
+    return tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options(a) } });
   }
   if (cmd === 'tog' && a === 'allPrices') {
     state.filters.allPrices = !state.filters.allPrices;
-    await save();
-    await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
-    return answer(state.filters.allPrices ? 'Qimmatlari ham chiqadi' : 'Faqat arzonlari chiqadi');
+    answer(state.filters.allPrices ? 'Qimmatlari ham chiqadi' : 'Faqat arzonlari chiqadi').catch(() => {});
+    save();
+    return tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
   }
   if (cmd === 'v') {
     state.filters[a] = Number(b);
-    await save();
-    await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
-    return answer('Saqlandi');
+    answer('Saqlandi').catch(() => {});
+    save();
+    return tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
   }
   if (cmd === 'go') {
     await answer('Qidiruv boshlandi');
@@ -563,13 +573,14 @@ for (;;) {
     const updates = await tg('getUpdates', { offset: state.offset, timeout: 50, allowed_updates: ['message', 'callback_query'] });
     for (const u of updates) {
       state.offset = u.update_id + 1;
-      try {
+      // kutmasdan ishga tushiramiz: uzoq qidiruv boshqa tugmalarni to'xtatib turmaydi
+      (async () => {
         if (u.message) await onMessage(u.message);
         else if (u.callback_query) await onCallback(u.callback_query);
-      } catch (e) {
+      })().catch((e) => {
         console.error('Xato:', e.message);
-        if (u.callback_query) await tg('answerCallbackQuery', { callback_query_id: u.callback_query.id, text: 'Xato: ' + e.message.slice(0, 150), show_alert: true }).catch(() => {});
-      }
+        if (u.callback_query && !/query is too old|not modified/i.test(e.message)) tg('answerCallbackQuery', { callback_query_id: u.callback_query.id, text: 'Xato: ' + e.message.slice(0, 150), show_alert: true }).catch(() => {});
+      });
     }
     if (updates.length) await save();
   } catch (e) {
