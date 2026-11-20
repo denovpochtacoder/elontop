@@ -270,6 +270,17 @@
         "sl55",
         "sl63"
       ]
+    },
+    {
+      "name": "Mercedes GLS",
+      "query": "mercedes gls",
+      "match": [
+        "gls"
+      ],
+      "exclude": [
+        "brabus",
+        "maybach"
+      ]
     }
   ],
   "years": [
