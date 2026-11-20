@@ -428,14 +428,22 @@ async function publish(cq, card) {
   if (state.published.includes(id)) return tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Bu e‘lon allaqachon chiqarilgan' });
   await ensurePhone(card);
   const caption = channelCaption(card);
-  const sent = await sendCarousel(cfg.channel_id, card, caption);
-  const postId = sent.main ?? sent.album?.[0];
+  // Kanalga oddiy albom (rich message emas): har qanday admin Premiumsiz tahrirlay oladi, nusxalash buzilmaydi
+  let ids;
+  try { ids = await sendAlbum(cfg.channel_id, card, caption); }
+  catch (e) {
+    console.warn("Albom yuborilmadi, bitta rasm bilan chiqariladi:", e.message);
+    const one = { ...card, ad: { ...card.ad, photos: photosOf(card).slice(0, 1) } };
+    try { ids = await sendAlbum(cfg.channel_id, one, caption); }
+    catch (e2) { ids = [(await tg("sendMessage", { chat_id: cfg.channel_id, text: caption, parse_mode: "HTML", link_preview_options: { is_disabled: true } })).message_id]; }
+  }
+  const postId = ids[0];
   if (postId) card.channelUrl = channelLink(postId);
   state.published.push(id);
   card.text = 'admin';
   await refreshCard(cq.message.chat.id, card);
   await save();
-  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: `Kanalga chiqarildi (${card.view === 'album' ? 'kollaj' : 'karusel'}) ✅` });
+  await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Kanalga chiqarildi ✅' });
 }
 
 // ---------- Update'larni qayta ishlash ----------
