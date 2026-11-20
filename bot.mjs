@@ -2,7 +2,7 @@
 // adminga rasm + tugmalar bilan yuboradi, "Kanalga chiqarish" bosilsa kanalga joylaydi.
 // Ishga tushirish: run-bot.cmd (token bot-token.txt faylidan o'qiladi).
 import { readFile, writeFile, rename } from 'node:fs/promises';
-import { fetchOffers, usdRate, normalize, fetchPhone, norm, olxStats } from './botlib/olx.mjs';
+import { fetchOffers, usdRate, normalize, fetchPhone, norm, olxStats, findCarCategory, CAR_CATEGORY } from './botlib/olx.mjs';
 import { cyr, formatPhone, phonesFromText, positionFrom, paintClean } from './botlib/text.mjs';
 import { evaluate, periodStart } from './botlib/market.mjs';
 
@@ -90,7 +90,8 @@ function options(kind) {
   if (kind === 'days') items = cfg.days.map((d) => btn(mark(f.days === d, dayLabel(d)), `v:days:${d}`));
   if (kind === 'discount') items = cfg.discounts.map((d) => btn(mark(f.discount === d, `${d}%+`), `v:discount:${d}`));
   const rows = [];
-  for (let i = 0; i < items.length; i += 3) rows.push(items.slice(i, i + 3));
+  const per = kind === 'model' ? 2 : 3;
+  for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per));
   rows.push([btn('⬅️ Orqaga', 'menu')]);
   return rows;
 }
@@ -321,12 +322,22 @@ async function search(chatId) {
   try {
     // Yil chegarasini 1 yilga kengroq so'raymiz: solishtirish yili ±1 bo'yicha
     const yr = { yearFrom: c.yearFrom ? c.yearFrom - 1 : 0, yearTo: c.yearTo ? c.yearTo + 1 : 0 };
+    // Marka kategoriyasi: configda bo'lsa o'sha, bo'lmasa bir marta OLX'dan aniqlanib saqlanadi
+    state.categoryIds ??= {};
+    let catId = c.model.category ?? state.categoryIds[c.model.query];
+    if (!catId) {
+      catId = await findCarCategory(c.model.query);
+      if (!catId) throw Object.assign(new Error(`OLX'da "${c.model.name}" bo‘yicha mashina e‘lonlari topilmadi`), { userText: true });
+      state.categoryIds[c.model.query] = catId;
+      await save();
+    }
+    c.model = { ...c.model, categoryId: catId };
     const nowTs = Date.now();
     const since = periodStart(c.days, nowTs);
-    const periodOpts = { ...yr, sinceTs: since };
+    const periodOpts = { ...yr, sinceTs: since, categoryId: catId };
     const maxP = cfg.max_pages_period ?? 10;
     const reqBefore = olxStats.requests;
-    const mkey = JSON.stringify([c.model.query, yr]);
+    const mkey = JSON.stringify([c.model.query, yr, catId]);
     let market = marketCache.get(mkey);
     let fromCache = false;
     if (!market || nowTs - market.at > PROT.market_cache_hours * 3600e3) {

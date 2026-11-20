@@ -1,7 +1,7 @@
 // OLX.uz ichki API'sidan e'lonlarni olish va soddalashtirish
 import { readFile } from 'node:fs/promises';
 
-export const CAR_CATEGORY = 983; // OLX: yengil avtomobillar
+export const CAR_CATEGORY = 983; // OLX: yengil avtomobillar > Chevrolet (boshqa markalar o'z kategoriyasida)
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
@@ -19,12 +19,25 @@ async function getJson(url) {
   return res.json();
 }
 
+// Marka kategoriyasini topadi: kategoriyasiz qidiradi va yili ko'rsatilgan (ya'ni mashina, ehtiyot qism emas)
+// e'lonlar eng ko'p tushgan kategoriyani qaytaradi. Topilmasa null.
+export async function findCarCategory(query) {
+  const j = await getJson(`https://www.olx.uz/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(query)}&sort_by=created_at%3Adesc`);
+  const count = new Map();
+  for (const a of j.data ?? []) {
+    if (a.category?.type !== 'automotive' || !param(a, 'motor_year')) continue;
+    count.set(a.category.id, (count.get(a.category.id) ?? 0) + 1);
+  }
+  const best = [...count].sort((x, y) => y[1] - x[1])[0];
+  return best && best[1] >= 2 ? best[0] : null;
+}
+
 // query bo'yicha maxPages sahifagacha e'lon oladi (har sahifa ~40-50 ta), faqat avtomobil bo'limidan.
 // opts: regionId (OLX viloyat ID), yearFrom/yearTo (yil chegarasi), file (internetsiz sinov uchun JSON).
-export async function fetchOffers(query, maxPages, { file, regionId, yearFrom, yearTo, sinceTs, minPages = 1 } = {}) {
+export async function fetchOffers(query, maxPages, { file, regionId, yearFrom, yearTo, sinceTs, minPages = 1, categoryId = CAR_CATEGORY } = {}) {
   if (file) return JSON.parse(await readFile(file, 'utf8')).data ?? [];
   const build = (withYearTo) => `https://www.olx.uz/api/v1/offers/?offset=0&limit=40&query=${encodeURIComponent(query)}`
-    + `&category_id=${CAR_CATEGORY}&sort_by=created_at%3Adesc`
+    + `&category_id=${categoryId}&sort_by=created_at%3Adesc`
     + (regionId ? `&region_id=${regionId}` : '')
     + (yearFrom ? `&filter_float_motor_year%3Afrom=${yearFrom}` : '')
     + (withYearTo && yearTo ? `&filter_float_motor_year%3Ato=${yearTo}` : '');

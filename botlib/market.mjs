@@ -10,8 +10,9 @@ export function median(nums) {
 
 // Model mosligi: OLX'dagi model nomi (yoki u bo'lmasa sarlavha) match so'zlaridan birini o'z ichiga olsin
 export function modelMatches(ad, model) {
-  if (ad.category !== CAR_CATEGORY) return false;
-  const hay = norm(ad.modelLabel || ad.modelKey || ad.title);
+  if (ad.category !== (model.categoryId ?? CAR_CATEGORY)) return false;
+  const hay = norm(`${ad.modelLabel ?? ''} ${ad.modelKey ?? ''} ${ad.title}`);
+  if (model.exclude?.some((t) => hay.includes(norm(t)))) return false; // masalan BMW 5 qidiruvida X5 chiqmasin
   return model.match.some((t) => hay.includes(norm(t)));
 }
 

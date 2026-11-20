@@ -10,83 +10,265 @@
       "query": "cobalt",
       "match": [
         "cobalt"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Nexia",
       "query": "nexia",
       "match": [
         "nexia"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Gentra",
       "query": "gentra",
       "match": [
         "gentra"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Lacetti",
       "query": "lacetti",
       "match": [
         "lacetti"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Spark",
       "query": "spark",
       "match": [
         "spark"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Malibu",
       "query": "malibu",
       "match": [
         "malibu"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Damas",
       "query": "damas",
       "match": [
         "damas"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Matiz",
       "query": "matiz",
       "match": [
         "matiz"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Onix",
       "query": "onix",
       "match": [
         "onix"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Tracker",
       "query": "tracker",
       "match": [
         "tracker"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Captiva",
       "query": "captiva",
       "match": [
         "captiva"
-      ]
+      ],
+      "category": 983
     },
     {
       "name": "Epica",
       "query": "epica",
       "match": [
         "epica"
+      ],
+      "category": 983
+    },
+    {
+      "name": "BYD Song Plus",
+      "query": "byd song plus",
+      "match": [
+        "songplus",
+        "song+"
+      ]
+    },
+    {
+      "name": "BYD Chazor",
+      "query": "byd chazor",
+      "match": [
+        "chazor",
+        "qinplus",
+        "qin+"
+      ]
+    },
+    {
+      "name": "BYD Han",
+      "query": "byd han",
+      "match": [
+        "han"
+      ]
+    },
+    {
+      "name": "BYD Seal",
+      "query": "byd seal",
+      "match": [
+        "seal"
+      ],
+      "exclude": [
+        "sealion"
+      ]
+    },
+    {
+      "name": "Zeekr 001",
+      "query": "zeekr 001",
+      "match": [
+        "001"
+      ]
+    },
+    {
+      "name": "Zeekr 7X",
+      "query": "zeekr 7x",
+      "match": [
+        "7x"
+      ]
+    },
+    {
+      "name": "Zeekr X",
+      "query": "zeekr x",
+      "match": [
+        "zeekrx"
+      ]
+    },
+    {
+      "name": "BMW 5",
+      "query": "bmw 5",
+      "match": [
+        "5seri",
+        "5сери",
+        "5er",
+        "520",
+        "525",
+        "528",
+        "530",
+        "535",
+        "540",
+        "550",
+        "m5"
+      ],
+      "exclude": [
+        "x1",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "xm"
+      ]
+    },
+    {
+      "name": "BMW X5",
+      "query": "bmw x5",
+      "match": [
+        "x5"
+      ]
+    },
+    {
+      "name": "BMW 3",
+      "query": "bmw 3",
+      "match": [
+        "3seri",
+        "3сери",
+        "320",
+        "325",
+        "328",
+        "330",
+        "335",
+        "340",
+        "m3"
+      ],
+      "exclude": [
+        "x1",
+        "x3",
+        "x4",
+        "x5",
+        "x6",
+        "x7",
+        "xm"
+      ]
+    },
+    {
+      "name": "Mercedes E",
+      "query": "mercedes e class",
+      "match": [
+        "eclass",
+        "eklass",
+        "eкласс",
+        "е-класс",
+        "екласс",
+        "e200",
+        "e220",
+        "e250",
+        "e300",
+        "e350",
+        "e400",
+        "e450",
+        "e63",
+        "w212",
+        "w213",
+        "w214"
+      ],
+      "exclude": [
+        "gle",
+        "gls",
+        "glc",
+        "cle",
+        "cls"
+      ]
+    },
+    {
+      "name": "Mercedes S",
+      "query": "mercedes s class",
+      "match": [
+        "sclass",
+        "sklass",
+        "sкласс",
+        "скласс",
+        "s350",
+        "s400",
+        "s450",
+        "s500",
+        "s550",
+        "s560",
+        "s580",
+        "s63",
+        "w221",
+        "w222",
+        "w223"
+      ],
+      "exclude": [
+        "gle",
+        "gls",
+        "glc",
+        "cls",
+        "sl55",
+        "sl63"
       ]
     }
   ],
