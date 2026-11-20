@@ -46,6 +46,7 @@ export function regionMatches(ad, region) {
 }
 
 // f: { model, yearFrom, yearTo, kmMax, region, days, minDiscount }
+// f.allPrices: qimmatlari va solishtirib bo'lmaydiganlari ham qaytadi (xorijiy mashinalar uchun)
 export function evaluate(ads, f, { minComparables = 5, now = Date.now(), ignorePeriod = false } = {}) {
   const models = ads.filter((a) => modelMatches(a, f.model));
   const pool = models.filter((a) => a.priceUsd > 0 && a.year);
@@ -63,13 +64,18 @@ export function evaluate(ads, f, { minComparables = 5, now = Date.now(), ignoreP
     if (!ignorePeriod && (!a.createdAt || a.createdAt < since)) continue;
     stats.inFilter++;
     const comp = comparables(a, pool, minComparables);
-    if (comp.length < minComparables) { stats.noComparables++; continue; }
+    if (comp.length < minComparables) {
+      stats.noComparables++;
+      if (f.allPrices) results.push({ ad: a, median: null, n: comp.length, discount: null, suspicious: false });
+      continue;
+    }
     const med = median(comp.map((b) => b.priceUsd));
     const discount = ((med - a.priceUsd) / med) * 100;
-    if (discount < f.minDiscount) continue;
+    if (!f.allPrices && discount < f.minDiscount) continue;
     results.push({ ad: a, median: med, n: comp.length, discount, suspicious: a.priceUsd < med * 0.6 });
   }
   // Shubhali (juda past) narxlar oxirida, qolganlari arzonlik bo'yicha
-  results.sort((x, y) => (x.suspicious - y.suspicious) || (y.discount - x.discount));
+  // Solishtirib bo'lmaganlari eng oxirida (yangilari oldin)
+  results.sort((x, y) => ((x.discount == null) - (y.discount == null)) || (x.suspicious - y.suspicious) || ((y.discount ?? 0) - (x.discount ?? 0)) || ((y.ad.createdAt ?? 0) - (x.ad.createdAt ?? 0)));
   return { stats, results };
 }

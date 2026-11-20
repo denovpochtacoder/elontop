@@ -62,14 +62,6 @@
       "category": 983
     },
     {
-      "name": "Matiz",
-      "query": "matiz",
-      "match": [
-        "matiz"
-      ],
-      "category": 983
-    },
-    {
       "name": "Onix",
       "query": "onix",
       "match": [
@@ -94,20 +86,34 @@
       "category": 983
     },
     {
-      "name": "Epica",
-      "query": "epica",
-      "match": [
-        "epica"
-      ],
-      "category": 983
-    },
-    {
       "name": "BYD Song Plus",
       "query": "byd song plus",
       "match": [
         "songplus",
         "song+"
-      ]
+      ],
+      "exclude": [
+        "champion",
+        "чемпион"
+      ],
+      "foreign": true
+    },
+    {
+      "name": "BYD Champion",
+      "query": "byd champion",
+      "match": [
+        "champion",
+        "чемпион"
+      ],
+      "foreign": true
+    },
+    {
+      "name": "BYD Yuan Up",
+      "query": "byd yuan up",
+      "match": [
+        "yuanup"
+      ],
+      "foreign": true
     },
     {
       "name": "BYD Chazor",
@@ -116,45 +122,40 @@
         "chazor",
         "qinplus",
         "qin+"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "BYD Han",
       "query": "byd han",
       "match": [
         "han"
-      ]
-    },
-    {
-      "name": "BYD Seal",
-      "query": "byd seal",
-      "match": [
-        "seal"
       ],
-      "exclude": [
-        "sealion"
-      ]
+      "foreign": true
     },
     {
       "name": "Zeekr 001",
       "query": "zeekr 001",
       "match": [
         "001"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "Zeekr 7X",
       "query": "zeekr 7x",
       "match": [
         "7x"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "Zeekr X",
       "query": "zeekr x",
       "match": [
         "zeekrx"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "BMW 5",
@@ -180,14 +181,16 @@
         "x6",
         "x7",
         "xm"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "BMW X5",
       "query": "bmw x5",
       "match": [
         "x5"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "BMW 3",
@@ -211,7 +214,8 @@
         "x6",
         "x7",
         "xm"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "Mercedes E",
@@ -240,7 +244,8 @@
         "glc",
         "cle",
         "cls"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "Mercedes S",
@@ -269,7 +274,8 @@
         "cls",
         "sl55",
         "sl63"
-      ]
+      ],
+      "foreign": true
     },
     {
       "name": "Mercedes GLS",
@@ -280,7 +286,8 @@
       "exclude": [
         "brabus",
         "maybach"
-      ]
+      ],
+      "foreign": true
     }
   ],
   "years": [

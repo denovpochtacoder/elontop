@@ -52,6 +52,8 @@ function current() {
     regionId: cfg.regions[f.region]?.id ?? 0,
     days: f.days,
     minDiscount: f.discount,
+    // Narx: xorijiy modellarda "Hammasi" tanlansa qimmatlari ham chiqadi; Chevrolet'da doim faqat arzon
+    allPrices: !!((cfg.models[f.model] ?? cfg.models[0]).foreign && f.allPrices),
   };
 }
 const kmLabel = (v) => (v ? `${fmt(v)} km gacha` : 'Hammasi');
@@ -67,13 +69,14 @@ function menu() {
     `👣 Probeg: <b>${kmLabel(c.kmMax)}</b>`,
     `📍 Viloyat: <b>${esc(c.region || 'Hammasi')}</b>`,
     `🕒 Davr: <b>${dayLabel(c.days)}</b>`,
-    `📉 Kamida: <b>${c.minDiscount}% arzon</b>`,
+    c.allPrices ? '💲 Narx: <b>Hammasi (qimmati ham)</b>' : `📉 Kamida: <b>${c.minDiscount}% arzon</b>`,
     Date.now() < (state.cooldownUntil ?? 0) ? `\n⛔️ OLX cheklovi: ${untilText(state.cooldownUntil)} gacha (IP almashgan bo‘lsa, /olx_reset)` : null,
   ].filter((l) => l !== null).join('\n');
   const reply_markup = { inline_keyboard: [
     [btn('🚗 Model', 'set:model'), btn('📅 Yil', 'set:year')],
     [btn('👣 Probeg', 'set:km'), btn('📍 Viloyat', 'set:region')],
     [btn('🕒 Davr', 'set:days'), btn('📉 Arzonlik %', 'set:discount')],
+    ...(c.model.foreign ? [[btn(c.allPrices ? '💲 Narx: Hammasi ✅ → Faqat arzon' : '💲 Narx: Faqat arzon ✅ → Hammasi', 'tog:allPrices')]] : []),
     [btn('🔍 Qidirish', 'go')],
   ] };
   return { text, reply_markup, parse_mode: 'HTML' };
@@ -109,11 +112,13 @@ function when(ts) {
 function adminCaption(card, extra = '') {
   const a = card.ad;
   const lines = [
-    `${level(card.discount)}: o‘rtachadan <b>${Math.round(card.discount)}%</b> arzon`,
+    card.discount == null ? '⚪️ NARX SOLISHTIRILMADI: o‘xshash e‘lon kam'
+      : card.discount >= 0 ? `${level(card.discount)}: o‘rtachadan <b>${Math.round(card.discount)}%</b> arzon`
+      : `🔴 QIMMAT: o‘rtachadan <b>${Math.round(-card.discount)}%</b> qimmat`,
     `${esc(tag(a.modelLabel || card.modelName))} · ${a.year} · ${a.km ? fmt(a.km) + ' km' : 'probeg yo‘q'}`,
     [a.gearbox, a.color, a.fuel, a.conditionLabel && `Holati: ${a.conditionLabel}`].filter(Boolean).map(esc).join(' · '),
     `💰 <b>${fmt(a.priceUsd)}$</b>${a.negotiable ? ' kelishiladi' : ''}`,
-    `📊 O‘xshash ${card.n} ta e‘lon o‘rtachasi: ${fmt(card.median)}$`,
+    card.median != null ? `📊 O‘xshash ${card.n} ta e‘lon o‘rtachasi: ${fmt(card.median)}$` : `📊 O‘xshash e‘lonlar: ${card.n} ta (kamida ${cfg.min_comparables} ta kerak)`,
     `🚩 ${esc([a.region, a.district].filter(Boolean).join(', '))}`,
     `🕒 ${when(a.createdAt)}`,
   ];
@@ -376,7 +381,7 @@ async function search(chatId) {
 
     let verdict;
     if (toSend.length) verdict = `Yuborilyapti: ${toSend.length}`;
-    else if (results.length) verdict = `Arzon variantlar bor (${results.length} ta), lekin hammasi sizga oldin yuborilgan.`;
+    else if (results.length) verdict = `${c.allPrices ? 'E‘lonlar' : 'Arzon variantlar'} bor (${results.length} ta), lekin hammasi sizga oldin yuborilgan.`;
     else if (stats.inFilter < 5) verdict = `💡 Filtr juda tor: davrga mos atigi ${stats.inFilter} ta e‘lon qoldi. Davrni, probegni yoki viloyatni kengaytiring.`;
     else verdict = `Filtrga mos ${stats.inFilter} ta e‘lon ichida kamida ${c.minDiscount}% arzoni yo‘q. Arzonlik foizini kamaytirib ko‘ring.`;
 
@@ -385,7 +390,7 @@ async function search(chatId) {
       `Tekshirildi: ${stats.fetched} e‘lon, model mos: ${stats.modelMatched}`,
       `Yili mos: ${stats.yearOk} → probegi mos: ${stats.kmOk} → viloyati mos: ${stats.regionOk} → davrga mos: ${stats.inFilter}`,
       stats.noComparables ? `Solishtirishga o‘xshashi kam: ${stats.noComparables}` : null,
-      `Kamida ${c.minDiscount}% arzon: ${results.length}, yangi: ${fresh.length}`,
+      c.allPrices ? `Barcha narxlar: ${results.length}, yangi: ${fresh.length}` : `Kamida ${c.minDiscount}% arzon: ${results.length}, yangi: ${fresh.length}`,
       verdict,
       fromCache ? `ℹ️ Saqlangan natija ishlatildi: OLX'ga so‘rov yuborilmadi.` : `ℹ️ OLX'ga ${used} ta so‘rov yuborildi.`,
     ].filter(Boolean).join('\n');
@@ -480,6 +485,12 @@ async function onCallback(cq) {
   if (cmd === 'set') {
     await tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options(a) } });
     return answer();
+  }
+  if (cmd === 'tog' && a === 'allPrices') {
+    state.filters.allPrices = !state.filters.allPrices;
+    await save();
+    await tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
+    return answer(state.filters.allPrices ? 'Qimmatlari ham chiqadi' : 'Faqat arzonlari chiqadi');
   }
   if (cmd === 'v') {
     state.filters[a] = Number(b);
