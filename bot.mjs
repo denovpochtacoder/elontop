@@ -189,7 +189,8 @@ function listButton(card, i, current) {
   const mark = current ? '👉' : state.published.includes(a.id) ? '✅' : d == null ? '⚪️' : d >= 3 ? '🟢' : d <= -3 ? '🔴' : '🟡';
   const pos = positionFrom(`${a.title} ${a.description ?? ''}`);
   const gear = /avto|авто/i.test(a.gearbox ?? '') ? 'Avtomat' : /mex|мех/i.test(a.gearbox ?? '') ? 'Mexanika' : '';
-  const parts = [`${a.modelLabel || card.modelName}${pos ? ` ${pos}-poz` : ''}`, gear, a.year, a.km ? `${Math.round(a.km / 1000)}k km` : '', `${fmt(a.priceUsd)}$`].filter(Boolean);
+  // Pozitsiya yozilgan bo'lsa o'sha, bo'lmasa uzatma qutisi; probeg to'liq
+  const parts = [`${a.modelLabel || card.modelName} ${pos ? `${pos}-poz` : gear}`.trim(), a.year, a.km ? `${fmt(a.km)} km` : '', `${fmt(a.priceUsd)}$`].filter(Boolean);
   const b = btn(`${mark} ${i + 1}. ${parts.join(' · ')}`, `pick:${card.viewer}:${a.id}`);
   if (d != null && d >= 3) b.style = 'success';
   else if (d != null && d <= -3) b.style = 'danger';
