@@ -306,7 +306,30 @@ async function sendCards(chatId, list, modelName) {
     await renderCard(chatId, card);
     await sleep(400);
   }
+  if (list.length) await sendNav(chatId, list.map((r) => r.ad.id));
   await save();
+}
+
+// ---------- Rangli tugmalar ro'yxati: e'lonni varaqlamasdan topish ----------
+// Yashil: arzon (3%+), qizil: qimmat (3%+), o'rtacha: oddiy rang + 🟡, solishtirilmagan: ⚪️
+function navButton(card, i) {
+  const d = card.discount;
+  const mark = state.published.includes(card.ad.id) ? '✅' : d == null ? '⚪️' : d >= 3 ? '🟢' : d <= -3 ? '🔴' : '🟡';
+  const pct = d == null ? '?' : d >= 0 ? `−${Math.round(d)}%` : `+${Math.round(-d)}%`;
+  const km = card.ad.km ? ` · ${Math.round(card.ad.km / 1000)}k km` : '';
+  const b = btn(`${mark} ${i + 1}. ${fmt(card.ad.priceUsd)}$ · ${card.ad.year}${km} · ${pct}`, `pick:${card.ad.id}`);
+  if (d != null && d >= 3) b.style = 'success';
+  else if (d != null && d <= -3) b.style = 'danger';
+  return [b];
+}
+async function sendNav(chatId, ids) {
+  ids = ids.filter((id) => state.cards[id]);
+  if (!ids.length) return;
+  if (state.nav?.msgId) await tg('deleteMessage', { chat_id: state.nav.chatId, message_id: state.nav.msgId }).catch(() => {});
+  const rows = ids.map((id, i) => navButton(state.cards[id], i));
+  const text = `📋 <b>${ids.length} ta e‘lon</b>: kerakligini bosing, e‘lon shu ro‘yxat ustiga chiqadi.\n🟢 arzon · 🟡 o‘rtacha · 🔴 qimmat · ⚪️ solishtirilmagan · ✅ kanalda`;
+  const msg = await tg('sendMessage', { chat_id: chatId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } });
+  state.nav = { chatId, msgId: msg.message_id, ids };
 }
 
 // Qidiruvdan keyin: qolgan yoki oldin ko'rsatilgan variantlar uchun tugma
@@ -452,6 +475,7 @@ async function publishNow(cq, card, id) {
   state.published.push(id);
   card.text = 'admin';
   await refreshCard(cq.message.chat.id, card);
+  if (state.nav?.ids?.includes(id)) await tg('editMessageReplyMarkup', { chat_id: state.nav.chatId, message_id: state.nav.msgId, reply_markup: { inline_keyboard: state.nav.ids.filter((x) => state.cards[x]).map((x, i) => navButton(state.cards[x], i)) } }).catch(() => {});
   await save();
   await tg('answerCallbackQuery', { callback_query_id: cq.id, text: 'Kanalga chiqarildi ✅' });
 }
@@ -531,8 +555,16 @@ async function onCallback(cq) {
   if (!card) return answer('E‘lon ma‘lumoti topilmadi, qayta qidiring', true);
   const chatId = m.chat.id;
   // Bot yangilanishidan oldingi kartalar: xabar ma'lumoti yo'q
-  if (!card.msgs) { card.msgs = { kind: m.photo ? 'photo' : 'text', main: m.message_id }; card.view = 'carousel'; card.text = 'admin'; }
+  if (!card.msgs && cmd !== 'pick') { card.msgs = { kind: m.photo ? 'photo' : 'text', main: m.message_id }; card.view = 'carousel'; card.text = 'admin'; }
   if (cmd === 'pub') return publish(cq, card);
+  if (cmd === 'pick') {
+    answer().catch(() => {});
+    if (card.msgs) await clearCard(chatId, card);
+    await renderCard(chatId, card);
+    if (state.nav?.ids?.includes(a)) await sendNav(chatId, state.nav.ids);
+    save();
+    return;
+  }
   if (cmd === 'prev') {
     await ensurePhone(card);
     card.text = 'channel';
