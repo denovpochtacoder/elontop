@@ -140,12 +140,28 @@ function gearboxText(label) {
   if (/mex|мех|manual/i.test(label)) return 'Механика';
   return esc(cyr(label));
 }
+// Xorijiy model: OLX sarlavhasidagi komplektatsiya ("BMW X5 i40 full" -> "i40 full")
+const modelCfg = (card) => cfg.models.find((x) => x.name === card.modelName);
+const TRIM_STOP = ['mercedes', 'benz', 'mercedesbenz', 'merc', 'bmw', 'byd', 'zeekr', 'chevrolet', 'sotiladi', 'sotaman', 'sotuvda', 'sotiladi', 'srochno', 'срочно', 'продаю', 'продается', 'продаётся', 'продам', 'продажа', 'mashina', 'avtomobil'];
+function trimOf(card) {
+  const m = modelCfg(card);
+  if (!m?.foreign) return '';
+  const drop = new Set([...m.name.split(/\s+/), ...m.query.split(/\s+/), ...TRIM_STOP].map((w) => norm(w)));
+  const words = String(card.ad.title ?? '').replace(/[^\p{L}\p{N}\s.+\-]/gu, ' ').split(/\s+/)
+    .filter((w) => w && norm(w) && !drop.has(norm(w)) && !/^\d{4,}$/.test(w.replace(/[.\s]/g, '')));
+  let out = '';
+  for (const w of words.slice(0, 5)) { if ((out + ' ' + w).trim().length > 32) break; out = (out + ' ' + w).trim(); }
+  return out;
+}
 function channelCaption(card) {
   const a = card.ad;
   const text = `${a.title} ${a.description ?? ''}`;
   const pos = positionFrom(text);
   const gear = gearboxText(a.gearbox);
-  const lines = [`${tag(a.modelLabel || card.modelName)}${gear ? ` ${gear}` : ''}${pos ? ` ${pos}-позиция` : ''} сотилади`, '', `📅 йили: ${a.year}`];
+  const trim = trimOf(card);
+  // Xorijiyda: model + OLX'dagi komplektatsiya (bo'lmasa uzatma qutisi); Chevrolet'da: model + uzatma + pozitsiya
+  const head = trim ? `${tag(card.modelName)} ${esc(trim)}` : `${tag(modelCfg(card)?.foreign ? card.modelName : (a.modelLabel || card.modelName))}${gear ? ` ${gear}` : ''}`;
+  const lines = [`${head}${pos ? ` ${pos}-позиция` : ''} сотилади`, '', `📅 йили: ${a.year}`];
   if (a.km) lines.push(`👣 пробег: ${comma(a.km)} км`);
   if (paintClean(text)) lines.push('💎 краскаси тоза');
   if (a.color) lines.push(`🎨 ранги: ${esc(cyr(a.color).toLowerCase())}`);
@@ -190,7 +206,8 @@ function listButton(card, i, current) {
   const pos = positionFrom(`${a.title} ${a.description ?? ''}`);
   const gear = /avto|авто/i.test(a.gearbox ?? '') ? 'Avtomat' : /mex|мех/i.test(a.gearbox ?? '') ? 'Mexanika' : '';
   // Pozitsiya yozilgan bo'lsa o'sha, bo'lmasa uzatma qutisi; probeg to'liq
-  const parts = [`${a.modelLabel || card.modelName} ${pos ? `${pos}-poz` : gear}`.trim(), a.year, a.km ? `${fmt(a.km)} km` : '', `${fmt(a.priceUsd)}$`].filter(Boolean);
+  const trim = trimOf(card);
+  const parts = [trim ? `${card.modelName} ${trim}` : `${modelCfg(card)?.foreign ? card.modelName : (a.modelLabel || card.modelName)} ${pos ? `${pos}-poz` : gear}`.trim(), a.year, a.km ? `${fmt(a.km)} km` : '', `${fmt(a.priceUsd)}$`].filter(Boolean);
   const b = btn(`${mark} ${i + 1}. ${parts.join(' · ')}`, `pick:${card.viewer}:${a.id}`);
   if (d != null && d >= 3) b.style = 'success';
   else if (d != null && d <= -3) b.style = 'danger';

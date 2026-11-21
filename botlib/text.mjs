@@ -32,7 +32,7 @@ export function formatPhone(raw) {
   let d = String(raw ?? '').replace(/\D/g, '');
   if (d.length === 12 && d.startsWith('998')) d = d.slice(3);
   if (d.length !== 9 || !CODES.has(d.slice(0, 2))) return null;
-  return `+998 ${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 7)} ${d.slice(7)}`;
+  return `+998${d}`; // bo'shliqsiz: +998917171011
 }
 // Matn ichidan telefon raqamlarini topadi
 export function phonesFromText(text) {
