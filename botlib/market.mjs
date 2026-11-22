@@ -16,6 +16,16 @@ export function modelMatches(ad, model) {
   return model.match.some((t) => hay.includes(norm(t)));
 }
 
+// Yoqilg'i guruhi: OLX yozuvi ("Elektr", "Gibrid", "Gaz/Benzin"...) -> electric | hybrid | ice
+export function fuelGroup(label) {
+  const t = String(label ?? '').toLowerCase();
+  if (!t) return null;
+  if (/gibrid|гибрид|hybrid/.test(t)) return 'hybrid';
+  if (/elektr|электр|electr/.test(t)) return 'electric';
+  if (/benzin|бензин|gaz|газ|dizel|дизел|metan|метан|propan|пропан/.test(t)) return 'ice';
+  return null;
+}
+
 // O'xshash e'lonlar: yili ±1, probegi ±50 000 km, holati bir xil (yetarli bo'lsa)
 function comparables(a, pool, minN) {
   let c = pool.filter((b) => b.id !== a.id && Math.abs(b.year - a.year) <= 1);
@@ -25,6 +35,11 @@ function comparables(a, pool, minN) {
     const wide = c.filter((b) => b.km && Math.abs(b.km - a.km) <= WIDE_KM);
     if (tight.length >= TIGHT_MIN) c = tight;
     else if (wide.length >= minN) c = wide;
+  }
+  const fg = fuelGroup(a.fuel);
+  if (fg) {
+    const sameFuel = c.filter((b) => fuelGroup(b.fuel) === fg);
+    if (sameFuel.length >= minN) c = sameFuel;
   }
   if (a.condition) {
     const same = c.filter((b) => b.condition === a.condition);
@@ -49,7 +64,7 @@ export function regionMatches(ad, region) {
 // f.allPrices: qimmatlari va solishtirib bo'lmaydiganlari ham qaytadi (xorijiy mashinalar uchun)
 export function evaluate(ads, f, { minComparables = 5, now = Date.now(), ignorePeriod = false } = {}) {
   const models = ads.filter((a) => modelMatches(a, f.model));
-  const pool = models.filter((a) => a.priceUsd > 0 && a.year);
+  const pool = models.filter((a) => a.priceUsd > 0 && a.year && (!f.fuel || fuelGroup(a.fuel) === f.fuel));
   const since = periodStart(f.days, now);
   const stats = { fetched: ads.length, modelMatched: models.length, withPrice: pool.length, yearOk: 0, kmOk: 0, regionOk: 0, inFilter: 0, noComparables: 0 };
   const results = [];

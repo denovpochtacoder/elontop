@@ -46,6 +46,8 @@ const btn = (text, data) => ({ text, callback_data: data });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- Filtrlar ----------
+// Yoqilg'i filtri (faqat xorijiy modellarda)
+const FUELS = [{ key: '', name: 'Hammasi' }, { key: 'electric', name: '⚡ Elektr' }, { key: 'hybrid', name: '🔋 Gibrid' }, { key: 'ice', name: '⛽ Benzin/Dizel' }];
 function current() {
   const f = state.filters;
   const y = cfg.years[f.year] ?? cfg.years[0];
@@ -59,6 +61,8 @@ function current() {
     minDiscount: f.discount,
     // Narx: xorijiy modellarda "Hammasi" tanlansa qimmatlari ham chiqadi; Chevrolet'da doim faqat arzon
     allPrices: !!((cfg.models[f.model] ?? cfg.models[0]).foreign && f.allPrices),
+    fuel: (cfg.models[f.model] ?? cfg.models[0]).foreign ? (FUELS[f.fuel]?.key ?? '') : '',
+    fuelName: FUELS[f.fuel]?.name ?? 'Hammasi',
   };
 }
 const kmLabel = (v) => (v ? `${fmt(v)} km gacha` : 'Hammasi');
@@ -74,6 +78,7 @@ function menu() {
     `👣 Probeg: <b>${kmLabel(c.kmMax)}</b>`,
     `📍 Viloyat: <b>${esc(c.region || 'Hammasi')}</b>`,
     `🕒 Davr: <b>${dayLabel(c.days)}</b>`,
+    c.model.foreign ? `⛽ Yoqilg‘i: <b>${c.fuel ? c.fuelName : 'Hammasi'}</b>` : null,
     c.allPrices ? '💲 Narx: <b>Hammasi (qimmati ham)</b>' : `📉 Kamida: <b>${c.minDiscount}% arzon</b>`,
     Date.now() < (state.cooldownUntil ?? 0) ? `\n⛔️ OLX cheklovi: ${untilText(state.cooldownUntil)} gacha (IP almashgan bo‘lsa, /olx_reset)` : null,
   ].filter((l) => l !== null).join('\n');
@@ -81,6 +86,7 @@ function menu() {
     [btn('🚗 Model', 'set:model'), btn('📅 Yil', 'set:year')],
     [btn('👣 Probeg', 'set:km'), btn('📍 Viloyat', 'set:region')],
     [btn('🕒 Davr', 'set:days'), btn('📉 Arzonlik %', 'set:discount')],
+    ...(c.model.foreign ? [[btn('⛽ Yoqilg‘i', 'set:fuel')]] : []),
     ...(c.model.foreign ? [[btn(c.allPrices ? '💲 Narx: Hammasi ✅ → Faqat arzon' : '💲 Narx: Faqat arzon ✅ → Hammasi', 'tog:allPrices')]] : []),
     [btn('🔍 Qidirish', 'go')],
   ] };
@@ -96,6 +102,7 @@ function options(kind) {
   if (kind === 'km') items = cfg.km.map((v, i) => btn(mark(f.km === i, kmLabel(v)), `v:km:${i}`));
   if (kind === 'region') items = cfg.regions.map((r, i) => btn(mark(f.region === i, r.name || 'Hammasi'), `v:region:${i}`));
   if (kind === 'days') items = cfg.days.map((d) => btn(mark(f.days === d, dayLabel(d)), `v:days:${d}`));
+  if (kind === 'fuel') items = FUELS.map((x, i) => btn(mark((f.fuel ?? 0) === i, x.name), `v:fuel:${i}`));
   if (kind === 'discount') items = cfg.discounts.map((d) => btn(mark(f.discount === d, `${d}%+`), `v:discount:${d}`));
   const rows = [];
   const per = kind === 'model' ? 2 : 3;
@@ -440,7 +447,7 @@ async function search(chatId) {
     else verdict = `Filtrga mos ${stats.inFilter} ta e‘lon ichida kamida ${c.minDiscount}% arzoni yo‘q. Arzonlik foizini kamaytirib ko‘ring.`;
 
     const summary = [
-      `🔎 <b>${esc(c.model.name)}</b> · ${esc(c.yearLabel)} · ${kmLabel(c.kmMax)} · ${esc(c.region || 'Hammasi')} · ${dayLabel(c.days)}`,
+      `🔎 <b>${esc(c.model.name)}</b>${c.fuel ? ` · ${c.fuelName}` : ''} · ${esc(c.yearLabel)} · ${kmLabel(c.kmMax)} · ${esc(c.region || 'Hammasi')} · ${dayLabel(c.days)}`,
       `Tekshirildi: ${stats.fetched} e‘lon, model mos: ${stats.modelMatched}`,
       `Yili mos: ${stats.yearOk} → probegi mos: ${stats.kmOk} → viloyati mos: ${stats.regionOk} → davrga mos: ${stats.inFilter}`,
       stats.noComparables ? `Solishtirishga o‘xshashi kam: ${stats.noComparables}` : null,
