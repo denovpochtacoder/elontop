@@ -98,6 +98,7 @@ function options(kind) {
   const mark = (on, t) => (on ? '✅ ' : '') + t;
   let items = [];
   if (kind === 'model') items = cfg.models.map((m, i) => btn(mark(f.model === i, m.name), `v:model:${i}`));
+  if (kind === 'delmodel') items = cfg.models.map((m, i) => btn(pendingDel === i ? `❗ Ha, ${m.name} o‘chirilsin` : `🗑 ${m.name}`, `delm:${i}`));
   if (kind === 'year') items = cfg.years.map((y, i) => btn(mark(f.year === i, y.label), `v:year:${i}`));
   if (kind === 'km') items = cfg.km.map((v, i) => btn(mark(f.km === i, kmLabel(v)), `v:km:${i}`));
   if (kind === 'region') items = cfg.regions.map((r, i) => btn(mark(f.region === i, r.name || 'Hammasi'), `v:region:${i}`));
@@ -105,10 +106,32 @@ function options(kind) {
   if (kind === 'fuel') items = FUELS.map((x, i) => btn(mark((f.fuel ?? 0) === i, x.name), `v:fuel:${i}`));
   if (kind === 'discount') items = cfg.discounts.map((d) => btn(mark(f.discount === d, `${d}%+`), `v:discount:${d}`));
   const rows = [];
-  const per = kind === 'model' ? 2 : 3;
+  const per = kind === 'model' || kind === 'delmodel' ? 2 : 3;
   for (let i = 0; i < items.length; i += per) rows.push(items.slice(i, i + per));
-  rows.push([btn('⬅️ Orqaga', 'menu')]);
+  if (kind === 'model') rows.push([btn('➕ Model qo‘shish', 'addm'), btn('🗑 Model o‘chirish', 'set:delmodel')]);
+  rows.push([btn('⬅️ Orqaga', kind === 'delmodel' ? 'set:model' : 'menu')]);
   return rows;
+}
+
+// ---------- Modellarni boshqarish (bot ichidan qo'shish / o'chirish) ----------
+let pendingDel = null; // o'chirishni tasdiqlash: birinchi bosishda so'raladi, ikkinchisida o'chadi
+const CHEVROLET = ['cobalt', 'nexia', 'gentra', 'lacetti', 'spark', 'malibu', 'damas', 'matiz', 'onix', 'tracker', 'captiva', 'epica', 'equinox', 'traverse', 'tahoe', 'labo', 'orlando', 'monza'];
+async function saveConfig() {
+  const tmp = here('bot-config.json.tmp');
+  await writeFile(tmp, JSON.stringify(cfg, null, 2) + '\n');
+  await rename(tmp, here('bot-config.json'));
+}
+// "Chery Tiggo 7 Pro" -> { name, query: 'chery tiggo 7 pro', match: ['tiggo7pro', 'cherytiggo7pro'] }
+function makeModel(text) {
+  const name = text.replace(/\s+/g, ' ').trim().slice(0, 40);
+  const words = name.split(' ');
+  const isChevy = words.some((w) => CHEVROLET.includes(norm(w))) || /chevrolet|шевроле/i.test(name);
+  const noBrand = words.length > 1 ? words.slice(1).join(' ') : name;
+  const match = [...new Set([norm(noBrand), norm(name)].filter((x) => x.length >= 2))];
+  const model = { name, query: name.toLowerCase().replace(/chevrolet\s*/i, '').trim() || name.toLowerCase(), match };
+  if (isChevy) { model.category = 983; model.match = [norm(words.find((w) => CHEVROLET.includes(norm(w))) ?? noBrand)]; }
+  else model.foreign = true;
+  return model;
 }
 
 // ---------- Matnlar ----------
@@ -525,6 +548,20 @@ async function onMessage(msg) {
     await tg('sendMessage', { chat_id: uid, text: `Siz admin qilib belgilandingiz (ID: ${uid}).` });
   }
   if (!isAdmin(uid)) return tg('sendMessage', { chat_id: uid, text: `Bu bot faqat admin uchun. Sizning ID: ${uid}` });
+  if (state.awaitModel && msg.text && !msg.text.startsWith('/')) {
+    state.awaitModel = false;
+    const model = makeModel(msg.text);
+    if (cfg.models.some((x) => norm(x.name) === norm(model.name))) {
+      await save();
+      return tg('sendMessage', { chat_id: uid, text: `"${model.name}" ro‘yxatda allaqachon bor.`, reply_markup: { inline_keyboard: [[btn('⬅️ Menyu', 'menu')]] } });
+    }
+    cfg.models.push(model);
+    await saveConfig();
+    state.filters.model = cfg.models.length - 1;
+    await save();
+    return tg('sendMessage', { chat_id: uid, parse_mode: 'HTML', text: `✅ <b>${esc(model.name)}</b> qo‘shildi va tanlandi.\nBirinchi qidiruvda bot OLX'dan shu markaning bo‘limini o‘zi topadi.`, reply_markup: menu().reply_markup });
+  }
+  if (msg.text?.startsWith('/bekor')) { state.awaitModel = false; await save(); }
   if (msg.text?.startsWith('/olx_reset')) {
     state.cooldownUntil = 0;
     state.phoneCooldownUntil = 0;
@@ -557,6 +594,7 @@ async function onCallback(cq) {
     return tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
   }
   if (cmd === 'set') {
+    pendingDel = null;
     answer().catch(() => {});
     return tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options(a) } });
   }
@@ -565,6 +603,31 @@ async function onCallback(cq) {
     answer(state.filters.allPrices ? 'Qimmatlari ham chiqadi' : 'Faqat arzonlari chiqadi').catch(() => {});
     save();
     return tg('editMessageText', { chat_id: m.chat.id, message_id: m.message_id, ...menu() });
+  }
+  if (cmd === 'addm') {
+    state.awaitModel = true;
+    save();
+    answer().catch(() => {});
+    return tg('sendMessage', { chat_id: m.chat.id, parse_mode: 'HTML', text: '✍️ Yangi model nomini <b>marka bilan</b> yozing.\nMasalan: <code>Chery Tiggo 7 Pro</code>, <code>Kia K5</code>, <code>Hyundai Sonata</code>\n\nBekor qilish: /bekor' });
+  }
+  if (cmd === 'delm') {
+    const i = Number(a);
+    const gone = cfg.models[i];
+    if (!gone) return answer('Topilmadi');
+    if (cfg.models.length <= 1) return answer('Kamida bitta model qolishi kerak', true);
+    if (pendingDel !== i) {
+      pendingDel = i;
+      answer(`${gone.name} o‘chirilsinmi? Tasdiqlash uchun yana bosing`).catch(() => {});
+      return tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options('delmodel') } });
+    }
+    pendingDel = null;
+    cfg.models.splice(i, 1);
+    if (state.filters.model === i) state.filters.model = 0;
+    else if (state.filters.model > i) state.filters.model--;
+    await saveConfig();
+    save();
+    answer(`🗑 ${gone.name} o‘chirildi`).catch(() => {});
+    return tg('editMessageReplyMarkup', { chat_id: m.chat.id, message_id: m.message_id, reply_markup: { inline_keyboard: options('delmodel') } });
   }
   if (cmd === 'v') {
     state.filters[a] = Number(b);
